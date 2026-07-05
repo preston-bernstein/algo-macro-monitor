@@ -90,3 +90,66 @@ fetch + parse with a User-Agent.
   directly against `steps.md` rather than via that skill.
 - Known, accepted, not-fixed-now (from challenge-notes): no `ingest`-CLI authN (single-operator
   host), CHECK-enum migration cost, no feed re-verification/failure alerting, symbol-universe drift.
+
+---
+
+## Post-merge deploy + live-snapshot verification (2026-07-05, same day)
+
+Ran what the merged PR's own DECISIONS.md entry (above) left deferred:
+
+- **Deployed for real.** `scripts/deploy.sh` (no `--dry-run`) executed as root: `algo-macro`'s venv
+  built, package installed, `macro-monitor-collect.timer` installed + enabled.
+- **Found and fixed a real bug in `paper_db_snapshot.py`** (the `paper-db-snapshot.timer` script,
+  lives outside this repo at `/usr/local/lib/algo-macro/paper_db_snapshot.py` on desktop — not
+  tracked in this git history, note for future sessions). The live `paper.db` is WAL-mode;
+  `sqlite3.Connection.backup()` copies that flag verbatim into the snapshot, so even a `mode=ro`
+  reader tried to create `-wal`/`-shm` sidecar files in `/srv/paper-share/` — which `algo-macro`
+  can't write to (by design) — and every read failed with "attempt to write a readonly database."
+  Fix: the snapshot script now runs `PRAGMA journal_mode=DELETE` on the destination connection
+  right after `.backup()`, while it's still the writable owner-side connection, converting the
+  on-disk copy to plain rollback-journal mode before handing it to the `paper-readers` group.
+  Verified: `algo-macro` can now open the snapshot, read `sqlite_master`, and `correlate` runs
+  clean against real data (see below).
+- **Live-snapshot `correlate` now actually verified**, not just the fixture: seeded
+  `sources` with the real `fed-press` feed, ran `collect-rss` for real (20 items), ran
+  `correlate --date 2026-07-02` (a date with real ingested observations) against the real
+  `/srv/paper-share/paper.db` snapshot → `2` correlations written, no errors. `scripts/smoke_e2e.sh`
+  passes clean end-to-end as the `algo-macro` user.
+- **All "deferred" bullets in the entry above are now resolved** except: WebSearch collection
+  (FR-02) + weekly review (FR-07) scheduling, and the ongoing continuous-campaign infra (queues
+  ~3/~3, mirroring algo-factory's systemd campaign+sync timer pattern) — both still TODO, see below.
+
+## Status snapshot + what's next (2026-07-05, end of this session — picking up later)
+
+**Running unattended right now, no action needed:**
+- `paper-db-snapshot.timer` (every 15 min, on desktop, outside this repo) — refreshes
+  `/srv/paper-share/paper.db`.
+- `macro-monitor-collect.timer` (installed by `deploy.sh`) — runs `collect-rss` on its own
+  schedule. Only `fed-press` is configured as a source right now; `wsj-markets` / `yahoo-finance`
+  mentioned in this repo's own earlier DECISIONS.md entry as "fetch + parse tested" were NOT added
+  to the deployed `config.yaml`'s `sources` table this session — only `fed-press` was seeded via
+  `macro-monitor sources add`. Add the others the same way if desired.
+
+**NOT yet built — this is the real next step for a fresh session:**
+- The ongoing `/spec-gather` → `/spec-challenge` → `/new-story` continuous-campaign loop for
+  THIS repo, mirroring `algo-factory`'s `algo-factory-desktop-campaign.timer` +
+  `algo-factory-desktop-sync.timer` pattern (see that repo's `docs/desktop-campaign-prompt.md` and
+  `.claude/skills/algo-factory-continuous-campaign/SKILL.md` as the template to adapt), but with
+  research/implementation queue targets of ~3/~3 instead of algo-factory's ~6/~6. This needs:
+  1. A `docs/desktop-campaign-prompt.md` in THIS repo adapted from algo-factory's (queue sizes,
+     repo path, and this repo's own non-negotiables — no `algo_factory` imports, no live-trading
+     authority, FR-16 tool allowlist for any WebSearch-touching subagent work).
+  2. Adapting or writing this repo's own equivalent of the `algo-factory-continuous-campaign`
+     skill (worktree isolation convention, kill-pre-spec convention, etc.) — or explicitly
+     deciding it can reuse the algo-factory one's *conventions* without literally sharing the file.
+  3. A `desktop-campaign-cycle.sh` + `desktop-sync-deploy.sh` pair (mirror algo-factory's scripts)
+     and matching systemd `.service`/`.timer` units, installed and enabled the same way
+     `algo-factory-desktop-campaign.timer`/`algo-factory-desktop-sync.timer` are.
+  4. The `schedule`-skill-hosted recurring agents for FR-02 (WebSearch collection) and FR-07
+     (weekly review) per `plan.md`'s architecture — these are Claude-Code-hosted scheduled
+     routines (`.claude/commands/macro-monitor-collect-websearch.md` and
+     `macro-monitor-review.md` already exist in this repo from the initial build; they just
+     aren't wired onto an actual recurring `schedule` invocation yet).
+- None of this is time-sensitive or fragile — the repo is in a fully clean, merged, deployed,
+  verified state. A future session can resume by reading this entry plus algo-factory's own
+  campaign infra as the template.

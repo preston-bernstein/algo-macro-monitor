@@ -1,0 +1,7 @@
+[Unit]
+Description=Read-only transaction-consistent snapshot of paper.db into /srv/paper-share for algo-macro-monitor
+
+[Service]
+Type=oneshot
+User=algo-factory
+ExecStart=/usr/bin/python3 /usr/local/lib/algo-macro/paper_db_snapshot.py
