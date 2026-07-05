@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "macro-monitor"
+version = "0.1.0"
+description = "Macro Context Monitor — read-only observation-and-hypothesis-proposal layer for internal-research-service paper strategies"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "Preston Bernstein", email = "contact@prestonbernstein.com" }]
+# NB (FR-12 structural guard): this list MUST NOT contain internal-research-service / algo_factory.
+# The absence of that dependency is what makes an accidental `import algo_factory` fail
+# at import time, not just at code review. Do not add it.
+dependencies = [
+    "click>=8.1",
+    "httpx>=0.27",
+    "feedparser>=6.0.11",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+macro-monitor = "macro_monitor.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "network: test performs a live network fetch (skips gracefully if unreachable)",
+]
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]

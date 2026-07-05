@@ -1,0 +1,18 @@
+# FR-15: raw scraped content, the log DB, credentials, and generated reports are NEVER committed.
+data/macro_monitor.db
+data/*.db
+data/*.db-wal
+data/*.db-shm
+reports/*.md
+.env
+config.yaml
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/

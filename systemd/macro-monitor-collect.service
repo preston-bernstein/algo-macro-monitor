@@ -1,0 +1,36 @@
+[Unit]
+Description=Macro Context Monitor — daily RSS collection + read-only paper.db correlation
+Documentation=https://github.com/preston-bernstein/internal-monitor-service
+# The correlator reads the local snapshot at /srv/paper-share/paper.db (refreshed by
+# paper-db-snapshot.timer). We do not hard-require that unit here — a missing/stale snapshot is a
+# logged no-op for the day (FR-05 failure handling), never a crash.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=internal-monitor-service
+Group=internal-monitor-service
+WorkingDirectory=/home/internal-monitor-service/app
+# 1) deterministic RSS collection (FR-01, no LLM); 2) read-only correlation for today (FR-05/06/17/18/19).
+# %V-style date is not available; use `date -u` via the wrapper the two ExecStart lines below encode.
+ExecStart=/home/internal-monitor-service/app/.venv/bin/macro-monitor --config /home/internal-monitor-service/app/config.yaml collect-rss
+ExecStart=/bin/sh -c '/home/internal-monitor-service/app/.venv/bin/macro-monitor --config /home/internal-monitor-service/app/config.yaml correlate --date "$(date -u +%%Y-%%m-%%d)"'
+
+# Hardening — this process ingests untrusted RSS content; keep its blast radius minimal.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+# Writable: the local log DB and generated reports only. paper.db is read via /srv/paper-share (ro).
+ReadWritePaths=/home/internal-monitor-service/app/data /home/internal-monitor-service/app/reports
+ReadOnlyPaths=/srv/paper-share
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target
