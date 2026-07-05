@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily trigger for Macro Context Monitor collection + correlation
+Documentation=https://github.com/preston-bernstein/algo-macro-monitor
+
+[Timer]
+# Cheap-and-frequent deterministic path (FR-01/NFR): daily. The expensive LLM review is separate,
+# weekly-or-slower, and NOT triggered here (FR-07). Mirrors algo-factory's paper-track.timer shape.
+OnCalendar=*-*-* 06:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
