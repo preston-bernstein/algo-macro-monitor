@@ -1,5 +1,7 @@
 # algo-macro-monitor
 
+[![CI](https://github.com/preston-bernstein/algo-macro-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/preston-bernstein/algo-macro-monitor/actions/workflows/ci.yml)
+
 A read-only **observation-and-hypothesis-proposal** layer over algo-factory's paper-traded
 strategies. It collects macro/market context (RSS feeds + scoped WebSearch), correlates it
 read-only against recorded strategy behavior in `paper.db`, and — no more than weekly — proposes
@@ -65,3 +67,8 @@ sudo -u algo-macro bash scripts/smoke_e2e.sh   # verify the live read path
 No signal/feature/sentiment-score output (FR-13), no automatic hand-off past `reports/<slug>.md`
 (FR-10/FR-11), no `algo_factory` import, no live-decision authority of any kind (FR-12). Raw
 scraped content, the log DB, and generated reports are all gitignored (FR-15).
+
+## License
+
+Proprietary — private repository, all rights reserved. See `license` in
+[`pyproject.toml`](pyproject.toml).
