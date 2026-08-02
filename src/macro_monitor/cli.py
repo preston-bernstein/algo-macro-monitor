@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date, timedelta
 
 import click
 
@@ -21,10 +22,12 @@ from . import (
     collector_websearch_ingest,
     correlator,
     db,
+    metrics,
     reviewer,
     sources,
 )
 from .config import Config, load_config
+from .log import log_event, new_run_id
 from .validation import ValidationError
 
 __version__ = "0.1.0"
@@ -115,14 +118,50 @@ def collect_rss_cmd(ctx) -> None:
     """FR-01: fetch + parse all pollable RSS feeds, append observations. No LLM."""
     cfg: Config = ctx.obj["config"]
     conn = _conn(ctx)
-    summary = collector_rss.collect_rss(conn, symbol_universe=cfg.symbol_universe)
+    run_id = new_run_id()
+    log_event("info", "collect.started", run_id=run_id)
+
+    summary = collector_rss.collect_rss(
+        conn, symbol_universe=cfg.symbol_universe, run_id=run_id
+    )
     if not summary.results:
         click.echo("no pollable rss sources configured", err=True)
+        log_event(
+            "error", "collect.no_sources", run_id=run_id, outcome="failed",
+            items_processed=0, work_available=0,
+        )
+        metrics.write_phase_metrics("collect", success=False, work_quantity=0, work_available=0)
         sys.exit(1)
+
     for r in summary.results:
         status = "ok" if r.ok else f"FAILED ({r.error})"
-        click.echo(f"{r.source}: {status} inserted={r.inserted} seen={r.seen}")
+        click.echo(f"{r.source}: {status} inserted={r.inserted} seen={r.seen}", err=not r.ok)
     click.echo(f"total inserted: {summary.total_inserted}")
+
+    work_available = sum(r.seen for r in summary.results)
+    feeds_ok = sum(1 for r in summary.results if r.ok)
+    feeds_failed = len(summary.results) - feeds_ok
+    outcome = "ok" if summary.any_success else "failed"
+    # §18 did-nothing rule: outcome and the work-quantity field are both always present on this
+    # closing line, and 0 is logged as an honest value, never omitted — a feed set that is up
+    # (feeds_ok > 0) but inserted 0 new items (every feed already fully collected, or every entry
+    # rejected) must be distinguishable from a feed set that is down.
+    log_event(
+        "info" if summary.any_success else "error",
+        "collect.completed",
+        run_id=run_id,
+        outcome=outcome,
+        items_processed=summary.total_inserted,
+        work_available=work_available,
+        feeds_ok=feeds_ok,
+        feeds_failed=feeds_failed,
+    )
+    metrics.write_phase_metrics(
+        "collect",
+        success=summary.any_success,
+        work_quantity=summary.total_inserted,
+        work_available=work_available,
+    )
     sys.exit(0 if summary.any_success else 1)
 
 
@@ -153,29 +192,98 @@ def ingest_cmd(ctx, source, observed_date, url, title_or_snippet, symbols) -> No
 
 
 @main.command("correlate")
-@click.option("--date", "observed_date", required=True, help="YYYY-MM-DD")
+@click.option(
+    "--date",
+    "observed_date",
+    default=None,
+    help="YYYY-MM-DD — correlate exactly this one observed_date (manual/back-fill use). "
+    "Mutually exclusive with --since.",
+)
+@click.option(
+    "--since",
+    default=None,
+    help="YYYY-MM-DD — correlate every distinct observed_date >= this value, not just one exact "
+    "date. Omit both --date and --since to use the config's correlate_lookback_days trailing "
+    "window from today — the default for the scheduled daily run, since an observation's own "
+    "observed_date (the feed entry's published date) routinely lags the day the job actually "
+    "runs on. See correlator.observed_dates_since for why a single exact date was a no-op.",
+)
 @click.option("--paper-db", "paper_db_path", default=None, help="Override paper.db snapshot path")
 @click.pass_context
-def correlate_cmd(ctx, observed_date, paper_db_path) -> None:
-    """FR-05/06/17/18/19: read-only paper.db correlation for one observed_date."""
+def correlate_cmd(ctx, observed_date, since, paper_db_path) -> None:
+    """FR-05/06/17/18/19: read-only paper.db correlation over one date or a trailing window."""
     cfg: Config = ctx.obj["config"]
     conn = _conn(ctx)
     path = paper_db_path or cfg.paper_db_path
+    run_id = new_run_id()
+
+    if observed_date is not None and since is not None:
+        raise click.ClickException("--date and --since are mutually exclusive")
+
     try:
-        results = correlator.correlate_date(conn, observed_date, paper_db_path=path)
+        if observed_date is not None:
+            dates = [observed_date]
+        else:
+            window_start = since or (
+                date.today() - timedelta(days=cfg.correlate_lookback_days)
+            ).isoformat()
+            dates = correlator.observed_dates_since(conn, window_start)
+    except ValidationError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    log_event("info", "correlate.started", run_id=run_id, dates_considered=len(dates))
+
+    total_written = 0
+    total_considered = 0
+    any_result = False
+    try:
+        for d in dates:
+            results = correlator.correlate_date(conn, d, paper_db_path=path)
+            any_result = any_result or bool(results)
+            for r in results:
+                total_considered += 1
+                total_written += r.written
+                click.echo(f"obs {r.observation_id}: tables={json.dumps(r.tables)}")
     except ValidationError as exc:
         raise click.ClickException(str(exc)) from exc
     except correlator.CorrelationError as exc:
         # FR-05/plan.md: read failures are logged, leave correlations untouched, non-zero exit.
         click.echo(f"correlation failed: {exc}", err=True)
+        log_event(
+            "error", "correlate.failed", run_id=run_id, outcome="failed",
+            err_type=type(exc).__name__, err_msg=str(exc),
+        )
+        metrics.write_phase_metrics("correlate", success=False, work_quantity=0, work_available=0)
         sys.exit(2)
-    if not results:
-        click.echo(f"no observations for {observed_date}")
-        return
-    total = sum(r.written for r in results)
-    for r in results:
-        click.echo(f"obs {r.observation_id}: tables={json.dumps(r.tables)}")
-    click.echo(f"correlations written: {total}")
+
+    if not dates:
+        click.echo("no observation dates in range")
+    elif not any_result:
+        click.echo(f"no observations for {dates[0]}" if len(dates) == 1 else
+                    f"no observations for {dates[0]}..{dates[-1]}")
+    else:
+        click.echo(f"correlations written: {total_written}")
+
+    # §18 did-nothing rule: a run that correlated nothing (total_written == 0, whether because
+    # there were no observations in range at all, or every observation's paper.db lookup came
+    # back empty) must be distinguishable from a run that did work — both here in the closing log
+    # line's outcome + work-quantity fields, and in the exported work_quantity/work_available
+    # metrics below.
+    log_event(
+        "info",
+        "correlate.completed",
+        run_id=run_id,
+        outcome="ok",
+        items_processed=total_written,
+        work_available=total_considered,
+        dates_considered=len(dates),
+    )
+    metrics.write_phase_metrics(
+        "correlate",
+        success=True,
+        work_quantity=total_written,
+        work_available=total_considered,
+    )
 
 
 # --- review ---------------------------------------------------------------------------------
@@ -205,6 +313,12 @@ def review_cmd(ctx, since, min_days, dry_run, hypotheses_json) -> None:
     try:
         if not dry_run and not reviewer.cadence_ok(conn, min_days=md):
             last = reviewer.last_successful_review(conn)
+            # Benign refusal, not a failure: the cadence gate working as designed. No review_runs
+            # row exists yet at this point, so this event carries no run_id — it precedes one.
+            log_event(
+                "info", "review.cadence_refused", outcome="refused",
+                min_days=md, last_completed_at=last["completed_at"] if last else None,
+            )
             raise click.ClickException(
                 f"cadence gate: < {md} days since last successful review "
                 f"(completed_at={last['completed_at'] if last else None}); refusing (FR-07)"
@@ -223,6 +337,14 @@ def review_cmd(ctx, since, min_days, dry_run, hypotheses_json) -> None:
         observations_considered=len(considered),
         dry_run=dry_run,
     )
+    # review_runs.id is the real correlation id for this unit of work (§18 Correlation) — it was
+    # persisted to review_runs and echoed to stdout for a human, but never appeared in a
+    # machine-parseable log line until now.
+    log_event(
+        "info", "review.started", run_id=str(run_id),
+        window_start=since, window_end=window_end, observations_considered=len(considered),
+        dry_run=dry_run,
+    )
 
     hypotheses = []
     if hypotheses_json:
@@ -238,9 +360,18 @@ def review_cmd(ctx, since, min_days, dry_run, hypotheses_json) -> None:
             written.append(path)
     except reviewer.ReviewError as exc:
         reviewer.close_review_run(conn, run_id, "failed")
+        log_event(
+            "error", "review.failed", run_id=str(run_id), outcome="failed",
+            err_type=type(exc).__name__, err_msg=str(exc), items_processed=len(written),
+        )
         raise click.ClickException(str(exc)) from exc
 
-    reviewer.close_review_run(conn, run_id, "dry-run" if dry_run else "ok")
+    status = "dry-run" if dry_run else "ok"
+    reviewer.close_review_run(conn, run_id, status)
+    log_event(
+        "info", "review.completed", run_id=str(run_id), outcome=status,
+        items_processed=len(written), work_available=len(hypotheses),
+    )
     click.echo(f"review run {run_id}: considered={len(considered)} reports={len(written)}")
     for p in written:
         click.echo(f"  wrote {p}")
