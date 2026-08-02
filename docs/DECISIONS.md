@@ -153,3 +153,53 @@ Ran what the merged PR's own DECISIONS.md entry (above) left deferred:
 - None of this is time-sensitive or fragile — the repo is in a fully clean, merged, deployed,
   verified state. A future session can resume by reading this entry plus internal-research-service's own
   campaign infra as the template.
+
+## Fleet observability contract conformance + a confirmed permanent no-op (2026-08-01)
+
+A fleet-wide `internal-infra` audit (`CONVENTIONS.md` §18) flagged this repo as zero-coverage
+(no metrics, no log levels, no correlation id in output) and specifically flagged the daily
+`correlate` step as a suspected permanent no-op. Both were investigated and fixed this session.
+
+**The no-op was real, and confirmed against the live deployment, not just by reading the code.**
+The systemd unit ran `correlate --date "$(date -u +%Y-%m-%d)"` at 06:30 UTC. `raw_observations`
+is stamped with each RSS entry's own published date (`collector_rss._entry_date`), which at that
+hour — the middle of the US business night — has essentially never advanced to "today" yet for
+any US-business-hours source. Checked on the desktop: `correlations` held exactly 2 rows total,
+both dated to a one-off manual verification recorded earlier in this file
+(`correlate --date 2026-07-02`, a date deliberately chosen to match existing data), never from
+the timer; the journal for the 2026-07-31 and 2026-08-01 runs both logged `no observations for
+<that day's UTC date>` immediately after `collect-rss` had just inserted rows for the *previous*
+day. Every automated run since deploy had silently correlated nothing.
+
+**Fix:** `correlator.observed_dates_since(conn, since)` returns every distinct `observed_date` in
+range; `correlate` with neither `--date` nor `--since` now walks a trailing window
+(`Config.correlate_lookback_days`, default 3) instead of asserting one exact day. `--date` (exact,
+for manual/back-fill use) and `--since` (explicit window start) remain available.
+`systemd/macro-monitor-collect.service`'s second `ExecStart` line no longer passes `--date`.
+Re-running an already-correlated date through this window is a safe no-op (`correlate_date` is
+idempotent via `INSERT OR IGNORE` + `UNIQUE(observation_id, paper_db_table)`).
+
+**Observability added**, per §18 (a `Type=oneshot` job cannot be scraped, so metrics go through
+the node-exporter textfile collector, not an HTTP endpoint — see `src/macro_monitor/metrics.py`
+and the README's new Observability section for the full account):
+- `src/macro_monitor/log.py` — one canonical JSON line per event to stderr, `click.echo`'s stdout
+  left alone as human-facing output.
+- `src/macro_monitor/metrics.py` — `macro_monitor.prom`, merge-not-clobber across the two phases,
+  atomic write.
+- `run_id` (a new UUID per CLI invocation for `collect-rss`/`correlate`; `review_runs.id` itself
+  for `review`, which existed in the DB but had never once appeared in any output line) is now on
+  every structured log line.
+- The did-nothing rule: every closing log line and the exported metrics carry both a
+  work-quantity and a work-available field, so "ran and did nothing" is distinguishable from "ran
+  and did work" in both signals, per §18.
+- Two `assert`-based FR-19 guards in `correlator.py` (which `python -O` would strip entirely)
+  became explicit `raise CorrelationError(...)`.
+- Per-entry RSS validation failures (previously a silent `except Exception: continue`) now
+  increment a `rejected` counter on `FeedResult` and log a WARN with the exception type (never the
+  untrusted entry content itself).
+
+**Deliberately not done in this pass:** Loki log shipping (a `internal-infra`-side Lane B change —
+`config.alloy`'s allow-list plus `tools/config-drift/lane-b-registry.json` — not something this
+repo can self-serve) and the corresponding `alert-rules.yml` entries (staleness, `absent()`, the
+did-nothing gate against the new metrics) — both live in `internal-infra`, not here. Nothing in this
+pass was deployed; `scripts/deploy.sh` was not run.

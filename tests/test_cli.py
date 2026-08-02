@@ -67,6 +67,132 @@ def test_ingest_and_correlate_flow(tmp_path, paper_db):
     assert "correlations written: 3" in res2.output
 
 
+def test_correlate_date_and_since_are_mutually_exclusive(tmp_path, paper_db):
+    runner = CliRunner()
+    res = runner.invoke(
+        main,
+        [
+            "--db-path", _db(tmp_path), "correlate",
+            "--date", "2026-07-04", "--since", "2026-07-01", "--paper-db", paper_db,
+        ],
+    )
+    assert res.exit_code != 0
+    assert "mutually exclusive" in res.output
+
+
+def test_correlate_since_walks_a_window_not_one_exact_date(tmp_path, paper_db):
+    """The fix for the production no-op: `--since` (and the no-flags default it backs) considers
+    every distinct observed_date in range, not one exact calendar date."""
+    runner = CliRunner()
+    dbp = _db(tmp_path)
+    runner.invoke(
+        main,
+        ["--db-path", dbp, "sources", "add", "--name", "websearch-wsb", "--kind", "websearch",
+         "--url-or-query", "q", "--checked-on", "2026-07-05"],
+    )
+    runner.invoke(
+        main,
+        ["--db-path", dbp, "ingest", "--source", "websearch-wsb", "--observed-date", "2026-07-04",
+         "--url", "https://x/1", "--title-or-snippet", "SPY squeeze", "--symbols", "SPY"],
+    )
+    # A "today" of 2026-07-06 would miss the 2026-07-04 observation under the old exact-date
+    # behavior; --since 2026-07-01 finds it, reproducing the fix that replaces the systemd unit's
+    # `--date "$(date -u +%Y-%m-%d)"` default.
+    res = runner.invoke(
+        main,
+        ["--db-path", dbp, "correlate", "--since", "2026-07-01", "--paper-db", paper_db],
+    )
+    assert res.exit_code == 0, res.output
+    assert "correlations written: 3" in res.output
+
+
+def test_correlate_no_flags_uses_config_lookback_window(tmp_path, paper_db, monkeypatch):
+    """With neither --date nor --since (the systemd unit's actual invocation), correlate must
+    still find an observation dated a few days back -- this is the no-op fix end to end."""
+    import macro_monitor.cli as cli_mod
+
+    class _FixedDate(cli_mod.date):
+        @classmethod
+        def today(cls):
+            return cli_mod.date(2026, 7, 6)
+
+    monkeypatch.setattr(cli_mod, "date", _FixedDate)
+
+    runner = CliRunner()
+    dbp = _db(tmp_path)
+    runner.invoke(
+        main,
+        ["--db-path", dbp, "sources", "add", "--name", "websearch-wsb", "--kind", "websearch",
+         "--url-or-query", "q", "--checked-on", "2026-07-05"],
+    )
+    runner.invoke(
+        main,
+        ["--db-path", dbp, "ingest", "--source", "websearch-wsb", "--observed-date", "2026-07-04",
+         "--url", "https://x/1", "--title-or-snippet", "SPY squeeze", "--symbols", "SPY"],
+    )
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(f"db_path: {dbp}\ncorrelate_lookback_days: 3\n")
+    res = runner.invoke(main, ["--config", str(cfg), "correlate", "--paper-db", paper_db])
+    assert res.exit_code == 0, res.output
+    assert "correlations written: 3" in res.output
+
+
+def test_correlate_writes_did_nothing_metrics_when_no_observations(tmp_path, paper_db, monkeypatch):
+    directory = tmp_path / "textfiles"
+    directory.mkdir()
+    monkeypatch.setenv("MACRO_MONITOR_TEXTFILE_DIR", str(directory))
+    runner = CliRunner()
+    res = runner.invoke(
+        main,
+        ["--db-path", _db(tmp_path), "correlate", "--since", "2026-07-04", "--paper-db", paper_db],
+    )
+    assert res.exit_code == 0
+    content = (directory / "macro_monitor.prom").read_text()
+    assert 'macro_monitor_work_quantity{phase="correlate"} 0' in content
+    assert 'macro_monitor_work_available{phase="correlate"} 0' in content
+    assert 'macro_monitor_last_run_success{phase="correlate"} 1' in content
+
+
+def test_collect_rss_writes_metrics_reflecting_work_done(tmp_path, monkeypatch, fed_feed_bytes):
+    monkeypatch.setattr(collector_rss, "_fetch", lambda url: fed_feed_bytes)
+    directory = tmp_path / "textfiles"
+    directory.mkdir()
+    monkeypatch.setenv("MACRO_MONITOR_TEXTFILE_DIR", str(directory))
+    runner = CliRunner()
+    dbp = _db(tmp_path)
+    runner.invoke(
+        main,
+        ["--db-path", dbp, "sources", "add", "--name", "fed", "--kind", "rss",
+         "--url-or-query", "https://x.test/f.xml", "--checked-on", "2026-07-05"],
+    )
+    res = runner.invoke(main, ["--db-path", dbp, "collect-rss"])
+    assert res.exit_code == 0
+    content = (directory / "macro_monitor.prom").read_text()
+    assert 'macro_monitor_work_quantity{phase="collect"} 2' in content
+    assert 'macro_monitor_last_run_success{phase="collect"} 1' in content
+
+
+def test_collect_rss_logs_a_structured_event_with_run_id(tmp_path, monkeypatch, fed_feed_bytes):
+    monkeypatch.setattr(collector_rss, "_fetch", lambda url: fed_feed_bytes)
+    runner = CliRunner()
+    dbp = _db(tmp_path)
+    runner.invoke(
+        main,
+        ["--db-path", dbp, "sources", "add", "--name", "fed", "--kind", "rss",
+         "--url-or-query", "https://x.test/f.xml", "--checked-on", "2026-07-05"],
+    )
+    res = runner.invoke(main, ["--db-path", dbp, "collect-rss"])
+    assert res.exit_code == 0
+    import json
+
+    events = [json.loads(line) for line in res.stderr.splitlines() if line.strip().startswith("{")]
+    completed = [e for e in events if e["event"] == "collect.completed"]
+    assert len(completed) == 1
+    assert completed[0]["outcome"] == "ok"
+    assert completed[0]["items_processed"] == 2
+    assert "run_id" in completed[0] and completed[0]["run_id"]
+
+
 def test_correlate_rejects_bad_date(tmp_path, paper_db):
     runner = CliRunner()
     res = runner.invoke(

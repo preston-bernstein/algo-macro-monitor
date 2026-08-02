@@ -15,6 +15,7 @@ import feedparser
 import httpx
 
 from . import db, sources
+from .log import log_event
 from .observations import insert_observation, tag_symbols
 
 USER_AGENT = "macro-monitor/0.1 (+https://github.com/preston-bernstein/internal-monitor-service)"
@@ -27,6 +28,7 @@ class FeedResult:
     ok: bool
     inserted: int = 0
     seen: int = 0
+    rejected: int = 0
     error: str | None = None
 
 
@@ -71,21 +73,48 @@ def fetch_and_log_rss(
     *,
     symbol_universe: list[str] | None = None,
     fallback_date: str | None = None,
+    run_id: str | None = None,
 ) -> FeedResult:
-    """Fetch one feed and append its entries. Never raises on fetch/parse failure (FR-13a)."""
+    """Fetch one feed and append its entries. Never raises on fetch/parse failure (FR-13a).
+
+    ``run_id`` (optional, §18 Correlation) is stamped onto every log line this call emits so a
+    feed's fetch/parse/reject events are all findable under the one run that produced them; it is
+    optional because the direct unit tests in tests/test_collect_rss.py call this without a CLI
+    run_id in scope.
+    """
     symbol_universe = symbol_universe or []
     default_date = fallback_date or db.now_iso()[:10]
     try:
         raw = _fetch(url)
     except Exception as exc:  # noqa: BLE001 - FR-13a: any fetch failure is logged + skipped
-        return FeedResult(source=source, ok=False, error=f"fetch: {type(exc).__name__}: {exc}")
+        error = f"fetch: {type(exc).__name__}: {exc}"
+        log_event(
+            "error", "collect.fetch_failed", run_id=run_id, source=source,
+            err_type=type(exc).__name__, err_msg=str(exc), outcome="failed",
+        )
+        return FeedResult(source=source, ok=False, error=error)
 
     parsed = feedparser.parse(raw)
     if parsed.bozo and not parsed.entries:
-        return FeedResult(source=source, ok=False, error=f"parse: {parsed.bozo_exception!r}")
+        error = f"parse: {parsed.bozo_exception!r}"
+        log_event(
+            "error", "collect.parse_failed", run_id=run_id, source=source,
+            err_type=type(parsed.bozo_exception).__name__, err_msg=str(parsed.bozo_exception),
+            outcome="failed",
+        )
+        return FeedResult(source=source, ok=False, error=error)
+    if parsed.bozo and parsed.entries:
+        # Malformed-but-still-parseable (e.g. a bad XML namespace) previously returned ok=True
+        # with zero trace of the malformation. Not fatal — the entries are usable — but worth a
+        # WARN so a feed drifting toward "fully broken" is visible before it gets there.
+        log_event(
+            "warn", "collect.feed_malformed_but_usable", run_id=run_id, source=source,
+            err_type=type(parsed.bozo_exception).__name__, err_msg=str(parsed.bozo_exception),
+        )
 
     inserted = 0
     seen = 0
+    rejected = 0
     for entry in parsed.entries:
         link = getattr(entry, "link", None)
         title = getattr(entry, "title", None) or getattr(entry, "summary", None)
@@ -103,15 +132,26 @@ def fetch_and_log_rss(
                 title_or_snippet=title,
                 tagged_symbols=symbols,
             )
-        except Exception:  # noqa: BLE001 - one malformed entry must not sink the whole feed
+        except Exception as exc:  # noqa: BLE001 - one malformed entry must not sink the whole feed
+            rejected += 1
+            # Never log the entry's own title/url verbatim here — it is untrusted third-party RSS
+            # content and §18 already treats a raw third-party payload as a logging risk; the
+            # exception type + count is enough to know a source has started violating validation.
+            log_event(
+                "warn", "collect.entry_rejected", run_id=run_id, source=source,
+                err_type=type(exc).__name__,
+            )
             continue
         if was_new:
             inserted += 1
-    return FeedResult(source=source, ok=True, inserted=inserted, seen=seen)
+    return FeedResult(source=source, ok=True, inserted=inserted, seen=seen, rejected=rejected)
 
 
 def collect_rss(
-    conn: sqlite3.Connection, *, symbol_universe: list[str] | None = None
+    conn: sqlite3.Connection,
+    *,
+    symbol_universe: list[str] | None = None,
+    run_id: str | None = None,
 ) -> CollectSummary:
     """Run FR-01 collection over every pollable RSS source. Exit-code policy lives in the CLI."""
     summary = CollectSummary()
@@ -122,6 +162,7 @@ def collect_rss(
                 row["name"],
                 row["url_or_query"],
                 symbol_universe=symbol_universe,
+                run_id=run_id,
             )
         )
     return summary

@@ -82,7 +82,9 @@ def build_query(table: str, observed_date: str | None = None) -> str:
     cols = MINIMAL_COLUMNS[table]
     leaked = set(cols) & FORBIDDEN_COLUMNS
     if leaked:  # pragma: no cover - guards against a future edit to MINIMAL_COLUMNS
-        raise AssertionError(f"FR-19 violation: {leaked} selected from {table}")
+        # An explicit raise, not `assert` — `assert` is stripped entirely under `python -O`,
+        # which would silently delete this FR-19 guard from optimized bytecode.
+        raise CorrelationError(f"FR-19 violation: {leaked} selected from {table}")
     date_col = DATE_COLUMN[table]
     return f"SELECT {', '.join(cols)} FROM {table} WHERE {date_col} = ?"  # noqa: S608 - fixed literals only
 
@@ -116,8 +118,11 @@ def _fetch_table_rows(
     result = []
     for row in rows:
         d = {k: row[k] for k in row.keys()}
-        # Final guard: no forbidden field can appear in what we persist (FR-19).
-        assert not (set(d) & FORBIDDEN_COLUMNS), f"FR-19 leak in {table}: {set(d) & FORBIDDEN_COLUMNS}"
+        # Final guard: no forbidden field can appear in what we persist (FR-19). An explicit
+        # raise, not `assert` — see build_query's identical fix for why.
+        leaked = set(d) & FORBIDDEN_COLUMNS
+        if leaked:
+            raise CorrelationError(f"FR-19 leak in {table}: {leaked}")
         result.append(d)
     return result
 
@@ -170,3 +175,31 @@ def correlate_date(
         results.append(CorrelationResult(observation_id=obs_id, written=written, tables=counts))
     conn.commit()
     return results
+
+
+def observed_dates_since(conn: sqlite3.Connection, since: str) -> list[str]:
+    """Distinct ``observed_date`` values in ``raw_observations``, ``>= since``, ascending.
+
+    Exists because the daily systemd timer's original ``correlate --date "$(date -u
+    +%Y-%m-%d)"`` invocation is very likely a **permanent no-op**: ``collect-rss`` stamps every
+    observation with the *feed entry's own* published/updated date (``collector_rss._entry_date``),
+    not the date the job happened to run on, and the timer fires at 06:30 UTC — the middle of the
+    US business night — before that UTC calendar date's own news exists anywhere. Confirmed against
+    the live deployment 2026-08-01: ``raw_observations`` has rows through 2026-07-31 only, while
+    both the 2026-07-31 and 2026-08-01 runs logged "no observations for <that day's date>", and
+    ``correlations`` holds exactly 2 rows total across the entire deployment's history — both from
+    a one-off manual DECISIONS.md verification against a date chosen to match, never from the
+    timer. Every automated day has silently correlated nothing since deploy.
+
+    The fix: the CLI's default ``correlate`` invocation (no ``--date``) now walks every distinct
+    observed_date from a trailing window instead of asserting one exact date. ``correlate_date`` is
+    idempotent (``INSERT OR IGNORE`` + ``UNIQUE(observation_id, paper_db_table)``), so re-covering
+    an already-correlated date here is a cheap no-op, not a correctness risk.
+    """
+    since = validate_observed_date(since)
+    rows = conn.execute(
+        "SELECT DISTINCT observed_date FROM raw_observations WHERE observed_date >= ? "
+        "ORDER BY observed_date",
+        (since,),
+    ).fetchall()
+    return [r["observed_date"] for r in rows]
