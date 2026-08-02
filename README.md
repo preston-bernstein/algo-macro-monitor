@@ -36,8 +36,8 @@ Two code paths that never share a process, a call stack, or a host environment. 
 is what makes "the AI review is never invoked from the data collector" true by construction, not
 just by convention.
 
-1. **Deterministic path** (runs on a systemd timer — a scheduled background job — no AI
-   involved). `collect-rss` fetches an allowed list of RSS/Atom feeds over plain HTTP, parses the
+1. **Deterministic path** (runs on a systemd timer, no AI involved). `collect-rss` fetches an
+   allowed list of RSS/Atom feeds over plain HTTP, parses the
    XML, and appends the results to the `raw_observations` table. `correlate` reads a local
    read-only snapshot of `/srv/paper-share/paper.db` and writes minimal correlation records.
 2. **AI path** (a Claude Code agent run through the `schedule` skill). A daily scoped web-search
@@ -100,8 +100,8 @@ human-facing, interactive output.
 
 **Metrics.** This job runs once and exits (`Type=oneshot` in systemd terms) instead of running as
 a long-lived server, so nothing can scrape a `/metrics` endpoint from it. Instead, `collect-rss`
-and `correlate` each write their metrics as plain text to a file that node-exporter (a monitoring
-agent) reads: `/opt/docker/observability/node-exporter-textfiles/macro_monitor.prom`. See
+and `correlate` each write their metrics as plain text to a file that node-exporter reads:
+`/opt/docker/observability/node-exporter-textfiles/macro_monitor.prom`. See
 `src/macro_monitor/metrics.py`. The metrics are `macro_monitor_last_run_timestamp_seconds`,
 `macro_monitor_last_run_success`, `macro_monitor_work_quantity`, and
 `macro_monitor_work_available`, each labeled `phase="collect"` or `phase="correlate"`.
@@ -125,8 +125,8 @@ instead of one exact day. `--date` (an exact date, for manual runs or backfillin
 (an explicit start date) still work as before. See the docstring for `observed_dates_since` in
 `src/macro_monitor/correlator.py` for the full account.
 
-**Not done yet, and why.** This repo doesn't ship its logs to Loki (the fleet's log aggregator)
-yet — that needs a change on the home-infra side (adding this service to `config.alloy`'s
+**Not done yet, and why.** This repo doesn't ship its logs to Loki yet — that needs a change on
+the home-infra side (adding this service to `config.alloy`'s
 allow-list and to `tools/config-drift/lane-b-registry.json`), which this repo can't do on its
 own. Alert rules for the new metrics — staleness, an `absent()` check, and the did-nothing gate —
 also live in home-infra's `alert-rules.yml` and haven't been added yet.
