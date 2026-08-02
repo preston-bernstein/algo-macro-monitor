@@ -12,18 +12,28 @@ Type=oneshot
 User=algo-macro
 Group=algo-macro
 WorkingDirectory=/home/algo-macro/app
-# 1) deterministic RSS collection (FR-01, no LLM); 2) read-only correlation for today (FR-05/06/17/18/19).
-# %V-style date is not available; use `date -u` via the wrapper the two ExecStart lines below encode.
+SyslogIdentifier=macro-monitor
+# 1) deterministic RSS collection (FR-01, no LLM); 2) read-only paper.db correlation over a
+# trailing window (FR-05/06/17/18/19). Previously this second line passed `--date
+# "$(date -u +%%Y-%%m-%%d)"` -- an exact date the daily 06:30 UTC fire could never actually match,
+# because raw_observations is stamped with each feed entry's own published date, which by 06:30
+# UTC has not yet advanced to "today" for any US-business-hours source. That made correlate a
+# permanent no-op in production (confirmed: correlations held 2 rows total, both from a one-off
+# manual DECISIONS.md check, never from the timer). `correlate` with no --date now defaults to a
+# trailing window (config's correlate_lookback_days) instead of one exact day -- see
+# src/macro_monitor/correlator.py's observed_dates_since docstring for the full account.
 ExecStart=/home/algo-macro/app/.venv/bin/macro-monitor --config /home/algo-macro/app/config.yaml collect-rss
-ExecStart=/bin/sh -c '/home/algo-macro/app/.venv/bin/macro-monitor --config /home/algo-macro/app/config.yaml correlate --date "$(date -u +%%Y-%%m-%%d)"'
+ExecStart=/home/algo-macro/app/.venv/bin/macro-monitor --config /home/algo-macro/app/config.yaml correlate
 
 # Hardening — this process ingests untrusted RSS content; keep its blast radius minimal.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-# Writable: the local log DB and generated reports only. paper.db is read via /srv/paper-share (ro).
-ReadWritePaths=/home/algo-macro/app/data /home/algo-macro/app/reports
+# Writable: the local log DB, generated reports, and the shared node-exporter textfile-collector
+# directory this unit's .prom metrics land in (§18 -- a oneshot job can't be scraped, so metrics
+# go out via the textfile collector on the way out). paper.db is read via /srv/paper-share (ro).
+ReadWritePaths=/home/algo-macro/app/data /home/algo-macro/app/reports /opt/docker/observability/node-exporter-textfiles
 ReadOnlyPaths=/srv/paper-share
 ProtectKernelTunables=true
 ProtectControlGroups=true
