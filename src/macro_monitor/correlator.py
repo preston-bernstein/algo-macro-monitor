@@ -196,7 +196,7 @@ def observed_dates_since(conn: sqlite3.Connection, since: str) -> list[str]:
     idempotent (``INSERT OR IGNORE`` + ``UNIQUE(observation_id, paper_db_table)``), so re-covering
     an already-correlated date here is a cheap no-op, not a correctness risk.
     """
-    since = validate_observed_date(since)
+    since = validate_observed_date(since, field_name="since")
     rows = conn.execute(
         "SELECT DISTINCT observed_date FROM raw_observations WHERE observed_date >= ? "
         "ORDER BY observed_date",

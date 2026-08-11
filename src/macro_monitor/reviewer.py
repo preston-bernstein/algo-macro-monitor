@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -165,13 +164,6 @@ def _observed_dates_for(conn: sqlite3.Connection, obs_ids: list[int]) -> list[st
         tuple(obs_ids),
     ).fetchall()
     return [r["observed_date"] for r in rows]
-
-
-@dataclass
-class ReviewOutcome:
-    review_run_id: int
-    written: list[str]  # slugs written
-    report_paths: list[str]
 
 
 def open_review_run(

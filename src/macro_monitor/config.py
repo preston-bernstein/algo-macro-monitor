@@ -6,7 +6,7 @@ override config values. Kept deliberately small — no schema framework for a ha
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 import yaml
@@ -44,16 +44,23 @@ def load_config(path: str | None = None) -> Config:
             path=str(cfg_path.resolve()),
         )
         return Config()
-    data = yaml.safe_load(cfg_path.read_text()) or {}
+    try:
+        data = yaml.safe_load(cfg_path.read_text()) or {}
+    except yaml.YAMLError as exc:
+        # Same "never silent" reasoning as the missing-file branch above, for the sibling failure
+        # mode: a config.yaml that exists but doesn't parse. Still re-raised — a malformed config
+        # is a genuine operator error, not something to silently fall back to defaults for — but
+        # now it's queryable in the same JSON stream as every other failure class first.
+        log_event(
+            "error",
+            "config.parse_failed",
+            path=str(cfg_path.resolve()),
+            err_type=type(exc).__name__,
+            err_msg=str(exc),
+        )
+        raise
     cfg = Config()
-    for key in (
-        "paper_db_path",
-        "db_path",
-        "reports_dir",
-        "review_min_days",
-        "correlate_lookback_days",
-        "symbol_universe",
-    ):
-        if key in data and data[key] is not None:
-            setattr(cfg, key, data[key])
+    for f in fields(Config):
+        if f.name in data and data[f.name] is not None:
+            setattr(cfg, f.name, data[f.name])
     return cfg

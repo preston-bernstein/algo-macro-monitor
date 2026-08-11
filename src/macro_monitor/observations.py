@@ -8,10 +8,12 @@ defined exactly once.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 
 from . import db
 from .validation import (
+    ValidationError,
     validate_observed_date,
     validate_symbols,
     validate_title,
@@ -40,8 +42,6 @@ def insert_observation(
     title_or_snippet = validate_title(title_or_snippet)
     symbols = validate_symbols(tagged_symbols)
     if not source:
-        from .validation import ValidationError
-
         raise ValidationError("source is required")
 
     key = db.dedup_key(source, url)
@@ -78,8 +78,6 @@ def tag_symbols(text: str, universe: list[str]) -> list[str]:
     Deliberately simple word-boundary matching — a quiet empty result on an unknown instrument is
     the accepted failure mode (plan.md symbol-universe-drift risk), never a crash.
     """
-    import re
-
     found: list[str] = []
     upper = text.upper()
     for sym in universe:

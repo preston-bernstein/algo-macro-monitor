@@ -111,12 +111,9 @@ def test_correlate_no_flags_uses_config_lookback_window(tmp_path, paper_db, monk
     still find an observation dated a few days back -- this is the no-op fix end to end."""
     import macro_monitor.cli as cli_mod
 
-    class _FixedDate(cli_mod.date):
-        @classmethod
-        def today(cls):
-            return cli_mod.date(2026, 7, 6)
-
-    monkeypatch.setattr(cli_mod, "date", _FixedDate)
+    # correlate_cmd sources "today" from db.now_iso() (UTC), not date.today() (local time) -- see
+    # docs/DECISIONS.md and cli.py's other now-sourced fields for why they must all agree.
+    monkeypatch.setattr(cli_mod.db, "now_iso", lambda: "2026-07-06T00:00:00+00:00")
 
     runner = CliRunner()
     dbp = _db(tmp_path)
