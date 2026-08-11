@@ -25,19 +25,23 @@ class ValidationError(ValueError):
     """Raised when an input fails validation, before any DB write or subprocess call."""
 
 
-def validate_observed_date(value: str) -> str:
+def validate_observed_date(value: str, *, field_name: str = "observed_date") -> str:
     """FR-18/FR-20: strict YYYY-MM-DD *and* a real calendar date. Returns the normalised string.
 
     This is the single gate that any externally-derived date passes through before it is used to
     build a query. Shell metacharacters, ``$()``, backticks, etc. all fail the regex here — long
     before the value reaches any SQL parameter or (in a hypothetical remote deployment) subprocess.
+
+    ``field_name`` is the caller's own name for the value being validated (``checked_on``,
+    ``since``, ...) — this function is reused well beyond ``observed_date`` itself, and the error
+    message should name the field the user actually typed, not this function's own parameter name.
     """
     if not isinstance(value, str) or not _DATE_RE.match(value):
-        raise ValidationError(f"observed_date must match YYYY-MM-DD, got {value!r}")
+        raise ValidationError(f"{field_name} must match YYYY-MM-DD, got {value!r}")
     try:
         parsed = date.fromisoformat(value)
     except ValueError as exc:
-        raise ValidationError(f"observed_date is not a real calendar date: {value!r}") from exc
+        raise ValidationError(f"{field_name} is not a real calendar date: {value!r}") from exc
     return parsed.isoformat()
 
 

@@ -35,7 +35,7 @@ def add_source(
     if not checked_on:
         raise ValidationError("checked_on is required (FR-03 spot-check gate)")
     # A checked_on must itself be a real YYYY-MM-DD date.
-    checked_on = validate_observed_date(checked_on)
+    checked_on = validate_observed_date(checked_on, field_name="checked_on")
     db.execute_write(
         conn,
         "INSERT OR REPLACE INTO sources(name, kind, url_or_query, fetchable, checked_on, notes) "
@@ -49,7 +49,7 @@ def set_fetchable(
     conn: sqlite3.Connection, name: str, fetchable: bool, checked_on: str
 ) -> None:
     """Update a source's fetchability + spot-check date after a live re-check (`sources check`)."""
-    checked_on = validate_observed_date(checked_on)
+    checked_on = validate_observed_date(checked_on, field_name="checked_on")
     cur = db.execute_write(
         conn,
         "UPDATE sources SET fetchable = ?, checked_on = ? WHERE name = ?",

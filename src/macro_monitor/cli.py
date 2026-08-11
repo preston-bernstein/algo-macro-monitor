@@ -14,10 +14,12 @@ from __future__ import annotations
 import json
 import sys
 from datetime import date, timedelta
+from pathlib import Path
 
 import click
 
 from . import (
+    __version__,
     collector_rss,
     collector_websearch_ingest,
     correlator,
@@ -30,12 +32,42 @@ from .config import Config, load_config
 from .log import log_event, new_run_id
 from .validation import ValidationError
 
-__version__ = "0.1.0"
-
 
 def _conn(ctx):
     cfg: Config = ctx.obj["config"]
     return db.init_db(cfg.db_path)
+
+
+def _finish_phase(
+    phase: str,
+    event: str,
+    *,
+    run_id: str,
+    level: str,
+    outcome: str,
+    success: bool,
+    work_quantity: int,
+    work_available: int,
+    **extra_log_fields,
+) -> None:
+    """Emit the closing §18 log_event + metrics.write_phase_metrics pair for one phase.
+
+    The did-nothing-rule numbers (work_quantity/work_available) and success/outcome must agree
+    across both signals — extracted so that invariant holds by construction instead of by
+    copy-paste discipline at each call site. Also surfaces a metrics write that was silently
+    skipped (textfile dir missing) as its own log line, so a production misconfiguration that
+    would otherwise degrade metrics coverage forever without ever failing a run is queryable in
+    the same JSON stream as everything else.
+    """
+    log_event(
+        level, event, run_id=run_id, outcome=outcome,
+        items_processed=work_quantity, work_available=work_available, **extra_log_fields,
+    )
+    written = metrics.write_phase_metrics(
+        phase, success=success, work_quantity=work_quantity, work_available=work_available,
+    )
+    if not written:
+        log_event("warn", "metrics.write_skipped", phase=phase, run_id=run_id)
 
 
 @click.group()
@@ -64,7 +96,7 @@ main.add_command(sources_group, name="sources")
 
 @sources_group.command("add")
 @click.option("--name", required=True)
-@click.option("--kind", type=click.Choice(["rss", "websearch"]), required=True)
+@click.option("--kind", type=click.Choice(list(sources.VALID_KINDS)), required=True)
 @click.option("--url-or-query", required=True)
 @click.option("--checked-on", default=None, help="YYYY-MM-DD spot-check date (FR-03, required)")
 @click.option("--fetchable/--not-fetchable", default=True)
@@ -126,11 +158,11 @@ def collect_rss_cmd(ctx) -> None:
     )
     if not summary.results:
         click.echo("no pollable rss sources configured", err=True)
-        log_event(
-            "error", "collect.no_sources", run_id=run_id, outcome="failed",
-            items_processed=0, work_available=0,
+        _finish_phase(
+            "collect", "collect.no_sources",
+            run_id=run_id, level="error", outcome="failed", success=False,
+            work_quantity=0, work_available=0,
         )
-        metrics.write_phase_metrics("collect", success=False, work_quantity=0, work_available=0)
         sys.exit(1)
 
     for r in summary.results:
@@ -146,21 +178,12 @@ def collect_rss_cmd(ctx) -> None:
     # closing line, and 0 is logged as an honest value, never omitted — a feed set that is up
     # (feeds_ok > 0) but inserted 0 new items (every feed already fully collected, or every entry
     # rejected) must be distinguishable from a feed set that is down.
-    log_event(
-        "info" if summary.any_success else "error",
-        "collect.completed",
-        run_id=run_id,
-        outcome=outcome,
-        items_processed=summary.total_inserted,
-        work_available=work_available,
-        feeds_ok=feeds_ok,
-        feeds_failed=feeds_failed,
-    )
-    metrics.write_phase_metrics(
-        "collect",
-        success=summary.any_success,
-        work_quantity=summary.total_inserted,
-        work_available=work_available,
+    _finish_phase(
+        "collect", "collect.completed",
+        run_id=run_id, level="info" if summary.any_success else "error",
+        outcome=outcome, success=summary.any_success,
+        work_quantity=summary.total_inserted, work_available=work_available,
+        feeds_ok=feeds_ok, feeds_failed=feeds_failed,
     )
     sys.exit(0 if summary.any_success else 1)
 
@@ -225,7 +248,7 @@ def correlate_cmd(ctx, observed_date, since, paper_db_path) -> None:
             dates = [observed_date]
         else:
             window_start = since or (
-                date.today() - timedelta(days=cfg.correlate_lookback_days)
+                date.fromisoformat(db.now_iso()[:10]) - timedelta(days=cfg.correlate_lookback_days)
             ).isoformat()
             dates = correlator.observed_dates_since(conn, window_start)
     except ValidationError as exc:
@@ -249,18 +272,21 @@ def correlate_cmd(ctx, observed_date, since, paper_db_path) -> None:
     except correlator.CorrelationError as exc:
         # FR-05/plan.md: read failures are logged, leave correlations untouched, non-zero exit.
         click.echo(f"correlation failed: {exc}", err=True)
-        log_event(
-            "error", "correlate.failed", run_id=run_id, outcome="failed",
+        _finish_phase(
+            "correlate", "correlate.failed",
+            run_id=run_id, level="error", outcome="failed", success=False,
+            work_quantity=0, work_available=0,
             err_type=type(exc).__name__, err_msg=str(exc),
         )
-        metrics.write_phase_metrics("correlate", success=False, work_quantity=0, work_available=0)
         sys.exit(2)
 
     if not dates:
         click.echo("no observation dates in range")
     elif not any_result:
-        click.echo(f"no observations for {dates[0]}" if len(dates) == 1 else
-                    f"no observations for {dates[0]}..{dates[-1]}")
+        if len(dates) == 1:
+            click.echo(f"no observations for {dates[0]}")
+        else:
+            click.echo(f"no observations for {dates[0]}..{dates[-1]}")
     else:
         click.echo(f"correlations written: {total_written}")
 
@@ -269,20 +295,11 @@ def correlate_cmd(ctx, observed_date, since, paper_db_path) -> None:
     # back empty) must be distinguishable from a run that did work — both here in the closing log
     # line's outcome + work-quantity fields, and in the exported work_quantity/work_available
     # metrics below.
-    log_event(
-        "info",
-        "correlate.completed",
-        run_id=run_id,
-        outcome="ok",
-        items_processed=total_written,
-        work_available=total_considered,
+    _finish_phase(
+        "correlate", "correlate.completed",
+        run_id=run_id, level="info", outcome="ok", success=True,
+        work_quantity=total_written, work_available=total_considered,
         dates_considered=len(dates),
-    )
-    metrics.write_phase_metrics(
-        "correlate",
-        success=True,
-        work_quantity=total_written,
-        work_available=total_considered,
     )
 
 
@@ -346,19 +363,18 @@ def review_cmd(ctx, since, min_days, dry_run, hypotheses_json) -> None:
         dry_run=dry_run,
     )
 
-    hypotheses = []
-    if hypotheses_json:
-        hypotheses = json.loads(open(hypotheses_json).read())
-
     written = []
     try:
+        hypotheses = []
+        if hypotheses_json:
+            hypotheses = json.loads(Path(hypotheses_json).read_text())
         for h in hypotheses:
             if dry_run:
                 reviewer.validate_hypothesis(h)  # validate but do not persist
                 continue
             path = reviewer.persist_hypothesis(conn, run_id, h, reports_dir=cfg.reports_dir)
             written.append(path)
-    except reviewer.ReviewError as exc:
+    except (OSError, json.JSONDecodeError, reviewer.ReviewError) as exc:
         reviewer.close_review_run(conn, run_id, "failed")
         log_event(
             "error", "review.failed", run_id=str(run_id), outcome="failed",

@@ -22,6 +22,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .log import log_event
+
 # --- schema ---------------------------------------------------------------------------------
 
 SCHEMA = """
@@ -151,4 +153,8 @@ def execute_write(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> sql
             time.sleep(delay)
             delay *= 2
     assert last is not None  # pragma: no cover
+    # Retry exhaustion on the documented two-writer-process overlap (module docstring) — loud via
+    # the re-raise below (non-zero exit), but also surfaced as its own queryable §18 event so it's
+    # filterable in the same JSON stream as every other failure class, not just a bare traceback.
+    log_event("error", "db.write_busy_exhausted", retries=BUSY_RETRIES, err_msg=str(last))
     raise last
