@@ -250,3 +250,60 @@ def test_review_writes_report_via_json(tmp_path):
     )
     assert res.exit_code == 0, res.output
     assert (reports / "test-hypothesis-slug.md").exists()
+
+
+def test_review_writes_metrics_reflecting_work_done(tmp_path, monkeypatch):
+    import json
+
+    directory = tmp_path / "textfiles"
+    directory.mkdir()
+    monkeypatch.setenv("MACRO_MONITOR_TEXTFILE_DIR", str(directory))
+    runner = CliRunner()
+    dbp = _db(tmp_path)
+    reports = tmp_path / "reports"
+    runner.invoke(
+        main,
+        ["--db-path", dbp, "sources", "add", "--name", "websearch-wsb", "--kind", "websearch",
+         "--url-or-query", "q", "--checked-on", "2026-07-05"],
+    )
+    runner.invoke(
+        main,
+        ["--db-path", dbp, "ingest", "--source", "websearch-wsb", "--observed-date", "2026-07-04",
+         "--url", "https://x/1", "--title-or-snippet", "SPY", "--symbols", "SPY"],
+    )
+    from macro_monitor.reviewer import OVERFITTING_DISCLOSURE
+
+    hyp = [{
+        "slug": "test-hypothesis-slug",
+        "mechanism_description": "desc",
+        "cited_observation_ids": [1],
+        "cited_paper_db_summary": {"targets": 1},
+        "overfitting_disclosure": OVERFITTING_DISCLOSURE,
+    }]
+    hjson = tmp_path / "h.json"
+    hjson.write_text(json.dumps(hyp))
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(f"db_path: {dbp}\nreports_dir: {reports}\n")
+    res = runner.invoke(
+        main,
+        ["--config", str(cfg), "review", "--hypotheses-json", str(hjson)],
+    )
+    assert res.exit_code == 0, res.output
+    content = (directory / "macro_monitor.prom").read_text()
+    assert 'macro_monitor_work_quantity{phase="review"} 1' in content
+    assert 'macro_monitor_work_available{phase="review"} 1' in content
+    assert 'macro_monitor_last_run_success{phase="review"} 1' in content
+
+
+def test_review_writes_did_nothing_metrics_when_no_hypotheses(tmp_path, monkeypatch):
+    directory = tmp_path / "textfiles"
+    directory.mkdir()
+    monkeypatch.setenv("MACRO_MONITOR_TEXTFILE_DIR", str(directory))
+    runner = CliRunner()
+    dbp = _db(tmp_path)
+    res = runner.invoke(main, ["--db-path", dbp, "review", "--since", "2026-07-01"])
+    assert res.exit_code == 0, res.output
+    content = (directory / "macro_monitor.prom").read_text()
+    assert 'macro_monitor_work_quantity{phase="review"} 0' in content
+    assert 'macro_monitor_work_available{phase="review"} 0' in content
+    assert 'macro_monitor_last_run_success{phase="review"} 1' in content
