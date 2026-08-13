@@ -203,3 +203,49 @@ and the README's new Observability section for the full account):
 repo can self-serve) and the corresponding `alert-rules.yml` entries (staleness, `absent()`, the
 did-nothing gate against the new metrics) — both live in `internal-infra`, not here. Nothing in this
 pass was deployed; `scripts/deploy.sh` was not run.
+
+## First-ever review run + review-phase observability gap closed (2026-08-13)
+
+- **`macro-monitor review` had never been invoked, automatically or manually, since deploy —
+  confirmed against `review_runs` (0 rows) with `raw_observations` (35 rows, 2026-05-21 through
+  2026-08-04) and `correlations` (18 rows) already accumulated.** Found while an `/advisor`
+  research sweep in the sibling `internal-research-service` repo asked whether this repo's hypothesis reports
+  were being consumed; the honest answer turned out to be one step further back — nothing had
+  ever produced a report to consume, because the `review` command's own docstring names it "the
+  schedule-skill agent turn" and no recurring invocation of that turn was ever wired up (this file,
+  2026-08-01 entry, item 4, already named this as outstanding).
+- **Ran the first review by hand** (`macro-monitor review --since 2026-05-21`, run_id 1, as the
+  `internal-monitor-service` service user), reading the full backlog rather than the default 7-day window since
+  this was the first-ever pass. **Verdict: zero candidate hypotheses.** The 35 observations are
+  almost entirely routine community-bank enforcement press releases (e.g. "Federal Reserve Board
+  issues enforcement action with former employee of Iuka Bancshares") with no plausible
+  macro-mechanism; `tagged_symbols` is `[]` on every one. The 18 correlations are same-day
+  coincidences with whatever crypto-momentum symbols (`strategy_b`) happened to be in
+  `paper.db` that date — no `gate_results` correlations exist at all, and FR-19's minimal-field
+  design means no return/direction data is even available to reason from. Proposing a hypothesis
+  from this would be exactly the noise-chasing FR-09's `OVERFITTING_DISCLOSURE` exists to flag.
+  Zero-hypotheses is a legitimate, designed outcome (the review command itself: "propose zero or
+  more") — this is a real triage decision, not a skipped one.
+- **The review phase was also the one command in this CLI that never reported through
+  `_finish_phase`/`metrics.write_phase_metrics`**, unlike `collect-rss`/`correlate` (both
+  instrumented in the 2026-08-01 entry above). That means a `review` that silently never ran again
+  would have been invisible to node-exporter indefinitely — the same class of gap the 2026-08-01
+  fix closed for the other two phases. Fixed: `review_cmd` in `src/macro_monitor/cli.py` now calls
+  `_finish_phase("review", ...)` on both the failure and success/dry-run paths, so
+  `macro_monitor_last_run_timestamp_seconds{phase="review"}` and the paired
+  work_quantity/work_available/success gauges now exist and reflect this run (2 new tests:
+  `test_review_writes_metrics_reflecting_work_done`, `test_review_writes_did_nothing_metrics_when_no_hypotheses`
+  in `tests/test_cli.py`; full suite + ruff clean).
+- **Deliberately not done in this pass:** wiring `/macro-monitor-review` onto an actual recurring
+  invocation (this file's 2026-08-01 entry's item 4, still outstanding). Anthropic's cloud-hosted
+  `schedule` routines were evaluated and ruled out — a cloud sandbox has no path to this desktop's
+  live `/home/internal-monitor-service/app/data/macro_monitor.db` or the `/srv/paper-share/paper.db` snapshot, so
+  the review would have nothing to read. The right shape is a local systemd timer + `claude -p`
+  invocation as the `internal-monitor-service` service user, matching the pattern already proven in
+  `internal-research-service/scripts/desktop_campaign_cycle.sh` (preflight, structured logging, fail-closed exit
+  codes) — but that script earned its complexity through real production hardening, and a rushed
+  copy is a worse outcome than an honestly-documented gap for unattended infra that reads untrusted
+  scraped content. Now that the metric exists, the concrete next step is a `internal-infra` alert on
+  `time() - macro_monitor_last_run_timestamp_seconds{phase="review"}` exceeding ~10-14 days (past
+  the FR-07 7-day minimum), which at least makes the staleness visible even before the recurring
+  invocation itself is built.

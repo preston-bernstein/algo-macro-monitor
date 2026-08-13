@@ -376,17 +376,24 @@ def review_cmd(ctx, since, min_days, dry_run, hypotheses_json) -> None:
             written.append(path)
     except (OSError, json.JSONDecodeError, reviewer.ReviewError) as exc:
         reviewer.close_review_run(conn, run_id, "failed")
-        log_event(
-            "error", "review.failed", run_id=str(run_id), outcome="failed",
-            err_type=type(exc).__name__, err_msg=str(exc), items_processed=len(written),
+        _finish_phase(
+            "review", "review.failed",
+            run_id=str(run_id), level="error", outcome="failed", success=False,
+            work_quantity=len(written), work_available=0,
+            err_type=type(exc).__name__, err_msg=str(exc),
         )
         raise click.ClickException(str(exc)) from exc
 
     status = "dry-run" if dry_run else "ok"
     reviewer.close_review_run(conn, run_id, status)
-    log_event(
-        "info", "review.completed", run_id=str(run_id), outcome=status,
-        items_processed=len(written), work_available=len(hypotheses),
+    # Every other phase (collect-rss, correlate) reports through _finish_phase so its staleness
+    # is visible on the same dashboard panel (§18) — review previously only logged, so a review
+    # that silently never ran (the FR-07 cadence gate has no timer of its own) was invisible to
+    # node-exporter for as long as nobody happened to grep the JSON log by hand.
+    _finish_phase(
+        "review", "review.completed",
+        run_id=str(run_id), level="info", outcome=status, success=True,
+        work_quantity=len(written), work_available=len(hypotheses),
     )
     click.echo(f"review run {run_id}: considered={len(considered)} reports={len(written)}")
     for p in written:
