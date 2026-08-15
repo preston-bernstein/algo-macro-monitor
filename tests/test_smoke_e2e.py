@@ -12,6 +12,7 @@ failed.
 from __future__ import annotations
 
 import pytest
+from feed_commons import PollError, poll
 
 from macro_monitor import collector_rss, db, sources
 from macro_monitor.correlator import correlate_date
@@ -24,9 +25,14 @@ def test_live_feed_collect_then_correlate(tmp_path, paper_db):
     conn = db.init_db(str(tmp_path / "macro_monitor.db"))
     sources.add_source(conn, "fed-press", "rss", LIVE_FEED, "2026-07-05")
     try:
-        collector_rss._fetch(LIVE_FEED)  # reachability probe
-    except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"live feed unreachable from sandbox: {exc}")
+        probe_items = poll(LIVE_FEED, excerpt_max_length=300, timeout_seconds=15)  # reachability probe
+    except PollError as exc:
+        pytest.skip(f"live feed unreachable from sandbox: {exc.code}")
+
+    # feed-commons contract: validate_https_url() enforcement means both the feed URL and
+    # every entry's own link must be HTTPS -- this repo's threat model depends on that.
+    assert probe_items
+    assert all(item["link"].startswith("https://") for item in probe_items)
 
     # Parse the real feed and log it (no LLM anywhere in this path).
     result = collector_rss.fetch_and_log_rss(

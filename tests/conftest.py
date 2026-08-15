@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 
 import pytest
 
@@ -73,9 +72,3 @@ def paper_db(tmp_path) -> str:
     conn.close()
     # mode=ro clients require the file to already exist (it does).
     return str(path)
-
-
-@pytest.fixture
-def fed_feed_bytes() -> bytes:
-    """A tiny but valid RSS feed for offline collector tests."""
-    return Path(__file__).with_name("fixtures").joinpath("sample_feed.xml").read_bytes()
