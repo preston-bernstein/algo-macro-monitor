@@ -7,7 +7,10 @@ name = "macro-monitor"
 version = "0.1.0"
 description = "Macro Context Monitor — read-only observation-and-hypothesis-proposal layer for algo-factory paper strategies"
 readme = "README.md"
-requires-python = ">=3.10"
+# Bumped from >=3.10: fleet-logging (below) requires Python >=3.11. CI runs 3.12, and the
+# desktop deploy host's python3 is 3.12.3, so this raises the declared floor to match reality
+# rather than lowering fleet-logging's.
+requires-python = ">=3.11"
 license = { text = "Proprietary" }
 authors = [{ name = "Preston Bernstein", email = "contact@prestonbernstein.com" }]
 # NB (FR-12 structural guard): this list MUST NOT contain algo-factory / algo_factory.
@@ -18,6 +21,11 @@ dependencies = [
     "httpx>=0.27",
     "feedparser>=6.0.11",
     "pyyaml>=6.0",
+    # Shared home-infra CONVENTIONS.md §18 logging + yaml/env config loader (see src/macro_monitor
+    # log.py and config.py, now thin wrappers around this). Pinned to an exact commit, not a
+    # floating branch, matching the scraper-commons pattern (see algo-factory/pyproject.toml).
+    # Bump this pin by hand when a newer fleet-logging commit is wanted.
+    "fleet-logging @ git+ssh://git@github.com/preston-bernstein/fleet-logging.git@fab3ce04dbd1b16479527fe4a512c6f8d1f960fb",
 ]
 
 [project.optional-dependencies]

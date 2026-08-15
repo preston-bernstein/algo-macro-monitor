@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from . import db
@@ -46,7 +46,7 @@ class ReviewError(RuntimeError):
 
 def _parse_iso(ts: str) -> datetime:
     dt = datetime.fromisoformat(ts)
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def last_successful_review(conn: sqlite3.Connection) -> sqlite3.Row | None:
@@ -67,7 +67,7 @@ def cadence_ok(conn: sqlite3.Connection, *, min_days: int = MIN_REVIEW_DAYS, now
     last = last_successful_review(conn)
     if last is None:
         return True
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     return now - _parse_iso(last["completed_at"]) >= timedelta(days=min_days)
 
 
@@ -250,5 +250,5 @@ def observations_since(conn: sqlite3.Connection, since: str | None) -> list[sqli
 
 
 def default_window_start(days: int = 7, *, today: date | None = None) -> str:
-    today = today or datetime.now(timezone.utc).date()
+    today = today or datetime.now(UTC).date()
     return (today - timedelta(days=days)).isoformat()
