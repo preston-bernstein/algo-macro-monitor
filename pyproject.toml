@@ -18,14 +18,15 @@ authors = [{ name = "Preston Bernstein", email = "contact@prestonbernstein.com" 
 # at import time, not just at code review. Do not add it.
 dependencies = [
     "click>=8.1",
-    "httpx>=0.27",
-    "feedparser>=6.0.11",
     "pyyaml>=6.0",
     # Shared home-infra CONVENTIONS.md §18 logging + yaml/env config loader (see src/macro_monitor
     # log.py and config.py, now thin wrappers around this). Pinned to an exact commit, not a
     # floating branch, matching the scraper-commons pattern (see algo-factory/pyproject.toml).
     # Bump this pin by hand when a newer fleet-logging commit is wanted.
     "fleet-logging @ git+ssh://git@github.com/preston-bernstein/fleet-logging.git@fab3ce04dbd1b16479527fe4a512c6f8d1f960fb",
+    # Same pattern as fleet-logging above (git+ssh pinned to an exact commit, not a floating
+    # branch). Bump this pin by hand when a newer feed-commons commit is wanted.
+    "feed-commons @ git+ssh://git@github.com/preston-bernstein/feed-commons.git@78fd77470345fe0fd63b961eb57e383cf60a1197",
 ]
 
 [project.optional-dependencies]
@@ -54,3 +55,14 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
+
+[tool.mutmut]
+source_paths = ["src"]
+only_mutate = ["src/macro_monitor/collector_rss.py"]
+# Scoped to the tests that actually exercise collector_rss.py -- repo-hygiene tests elsewhere
+# (test_gitignore.py, test_slash_command_allowlist.py, etc.) read repo-root files mutmut's sandbox
+# doesn't copy and would fail there for reasons unrelated to any mutation.
+pytest_add_cli_args_test_selection = [
+    "-m", "not network",
+    "tests/test_collect_rss.py", "tests/test_cli.py", "tests/test_no_forbidden_imports.py",
+]

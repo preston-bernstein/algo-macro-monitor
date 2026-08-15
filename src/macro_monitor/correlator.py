@@ -182,7 +182,7 @@ def observed_dates_since(conn: sqlite3.Connection, since: str) -> list[str]:
 
     Exists because the daily systemd timer's original ``correlate --date "$(date -u
     +%Y-%m-%d)"`` invocation is very likely a **permanent no-op**: ``collect-rss`` stamps every
-    observation with the *feed entry's own* published/updated date (``collector_rss._entry_date``),
+    observation with the *feed entry's own* published/updated date (from feed-commons' normalized ``pub_date``),
     not the date the job happened to run on, and the timer fires at 06:30 UTC — the middle of the
     US business night — before that UTC calendar date's own news exists anywhere. Confirmed against
     the live deployment 2026-08-01: ``raw_observations`` has rows through 2026-07-31 only, while
