@@ -95,8 +95,10 @@ infrastructure repo that sets fleet-wide logging rules).
 **Logs.** `collect-rss`, `correlate`, and `review` each write one JSON log line per event to
 stderr. Each line carries `schema_version`, `ts` (timestamp), `level`, `service`, `event`, `msg`,
 and `run_id`, plus an `outcome` and a work-quantity field on the closing line of each run. See
-`src/macro_monitor/log.py`. Separately, `click.echo` output to stdout is unchanged — that's the
-human-facing, interactive output.
+`src/macro_monitor/log.py` — a thin wrapper around the shared `fleet-logging` package (see
+`docs/DECISIONS.md`'s 2026-08-14 entry) that keeps this repo's call sites and stderr channel
+unchanged. Separately, `click.echo` output to stdout is unchanged — that's the human-facing,
+interactive output.
 
 **Metrics.** This job runs once and exits (`Type=oneshot` in systemd terms) instead of running as
 a long-lived server, so nothing can scrape a `/metrics` endpoint from it. Instead, `collect-rss`
