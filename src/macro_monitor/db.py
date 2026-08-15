@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .log import log_event
@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS candidate_hypotheses(
 
 def now_iso() -> str:
     """Current UTC timestamp, ISO8601, second precision. Single source so tests can monkeypatch."""
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def dedup_key(source: str, url: str) -> str:

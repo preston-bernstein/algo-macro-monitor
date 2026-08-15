@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -73,7 +73,7 @@ def test_cadence_ok_when_no_prior_review():
 
 def test_cadence_blocks_within_7_days():
     conn = db.init_db(":memory:")
-    recent = (datetime.now(timezone.utc) - timedelta(days=2)).replace(microsecond=0).isoformat()
+    recent = (datetime.now(UTC) - timedelta(days=2)).replace(microsecond=0).isoformat()
     db.execute_write(
         conn,
         "INSERT INTO review_runs(started_at, completed_at, status, window_start, window_end, "
@@ -87,7 +87,7 @@ def test_cadence_blocks_within_7_days():
 def test_cadence_ignores_failed_runs():
     # A crashed run must not poison the gate (plan.md).
     conn = db.init_db(":memory:")
-    recent = (datetime.now(timezone.utc) - timedelta(days=1)).replace(microsecond=0).isoformat()
+    recent = (datetime.now(UTC) - timedelta(days=1)).replace(microsecond=0).isoformat()
     db.execute_write(
         conn,
         "INSERT INTO review_runs(started_at, completed_at, status, window_start, window_end, "

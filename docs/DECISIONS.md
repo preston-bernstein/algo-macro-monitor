@@ -249,3 +249,48 @@ pass was deployed; `scripts/deploy.sh` was not run.
   `time() - macro_monitor_last_run_timestamp_seconds{phase="review"}` exceeding ~10-14 days (past
   the FR-07 7-day minimum), which at least makes the staleness visible even before the recurring
   invocation itself is built.
+
+## Migrated to shared `fleet-logging` package (2026-08-14)
+
+- **`src/macro_monitor/log.py` and `src/macro_monitor/config.py` are now thin wrappers around the
+  new shared `fleet-logging` package** (git-pinned dependency in `pyproject.toml`, exact commit
+  `fab3ce04dbd1b16479527fe4a512c6f8d1f960fb`, same `git+ssh://...@<commit>` pattern
+  `internal-research-service/pyproject.toml` already uses for `scraper-commons`). `fleet-logging` was built as
+  a strict superset of this module's own hand-rolled implementations, among two other repos' —
+  see its README's "What it replaces" section. The old hand-rolled JSON formatter, redaction set,
+  and yaml-to-dataclass loader were deleted, not just superseded; both files now delegate to
+  `fleet_logging.log_event`/`new_run_id`/`load_config` under thin wrappers that preserve every
+  existing call site's signature unchanged.
+- **One real behavior gap found and closed during the swap, not shipped silently**:
+  `fleet_logging.load_config`'s own internal `config.missing`/`config.parse_failed` log lines have
+  no `stream=` override and default to stdout, but this repo's §18 contract requires every
+  machine-readable log line on stderr (kept separate from `click.echo`'s human-facing stdout).
+  `config.py`'s `load_config` now wraps the `fleet_logging.load_config` call in a narrow,
+  restored-in-`finally` stdout→stderr redirect for that one synchronous call only (the first thing
+  `cli.py`'s `main()` does, before any `click.echo` output exists). Caught by
+  `tests/test_config.py`, added in this pass — `config.py` had zero dedicated test coverage
+  before.
+- **`env_prefix="MACRO_MONITOR_"` passed explicitly** to `load_config`: the shared package adds an
+  env-var-overlay capability this repo never had before (bare uppercased field names by default,
+  e.g. `DB_PATH`). Given this service runs live under systemd and those bare names are generic
+  enough to collide with an unrelated future env var by accident, every override is namespaced
+  under `MACRO_MONITOR_` instead. Nothing today sets any of these names, prefixed or not, so this
+  changes no resolved config value right now.
+- **A second real behavior gap found in code review, also closed before shipping**:
+  `fleet_logging.load_config` unconditionally calls python-dotenv's `load_dotenv()` unless a
+  `dotenv_path=` is given — with no path, that walks *up the filesystem tree from wherever the
+  `fleet_logging` package itself is installed* (site-packages, not this repo's cwd) looking for a
+  file literally named `.env`, and silently overlays whatever it finds into `os.environ`. This
+  repo's original loader never touched `.env` at all. `config.py` now pins an explicit,
+  guaranteed-nonexistent `dotenv_path=` (`_NO_DOTENV`) so that call is always a no-op, matching
+  the original behavior exactly. Verified by a test that spies on the actual `load_dotenv` call
+  arguments (`tests/test_config.py::test_load_config_never_triggers_dotenv_tree_walk`), not just an
+  absence of symptoms — a real ambient `.env` above site-packages isn't something a test can force.
+- **`requires-python` bumped `>=3.10` → `>=3.11`**: `fleet-logging` requires Python 3.11+. CI
+  already runs 3.12 and the desktop deploy host's `python3` is 3.12.3, so this raises the declared
+  floor to match what was already true in practice. The bump surfaced `ruff`'s `UP017` rule
+  (`datetime.UTC` alias) against four pre-existing, unrelated call sites
+  (`db.py`, `reviewer.py` x3, `test_reviewer.py` x2) — fixed via `ruff check --fix`; `datetime.UTC`
+  is the same object as `datetime.timezone.utc`, not a behavior change.
+- Full test suite (110 tests, including the 7 new `test_config.py` cases) and `ruff check` both
+  clean after the swap. Deployed via `scripts/deploy.sh` and smoke-verified the same day.
