@@ -150,8 +150,27 @@ def test_correlate_writes_did_nothing_metrics_when_no_observations(tmp_path, pap
     assert 'macro_monitor_last_run_success{phase="correlate"} 1' in content
 
 
-def test_collect_rss_writes_metrics_reflecting_work_done(tmp_path, monkeypatch, fed_feed_bytes):
-    monkeypatch.setattr(collector_rss, "_fetch", lambda url: fed_feed_bytes)
+def test_collect_rss_writes_metrics_reflecting_work_done(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        collector_rss,
+        "poll",
+        lambda url, excerpt_max_length=300, timeout_seconds=15: [
+            {
+                "title": "FOMC holds rates; SPY reaction watched",
+                "link": "https://example.test/press/1",
+                "guid": "https://example.test/press/1",
+                "pub_date": "2026-07-04T14:00:00+00:00",
+                "description_excerpt": "test",
+            },
+            {
+                "title": "Treasury yields drift, TLT in focus",
+                "link": "https://example.test/press/2",
+                "guid": "https://example.test/press/2",
+                "pub_date": "2026-07-04T15:30:00+00:00",
+                "description_excerpt": "test",
+            },
+        ],
+    )
     directory = tmp_path / "textfiles"
     directory.mkdir()
     monkeypatch.setenv("MACRO_MONITOR_TEXTFILE_DIR", str(directory))
@@ -169,8 +188,27 @@ def test_collect_rss_writes_metrics_reflecting_work_done(tmp_path, monkeypatch, 
     assert 'macro_monitor_last_run_success{phase="collect"} 1' in content
 
 
-def test_collect_rss_logs_a_structured_event_with_run_id(tmp_path, monkeypatch, fed_feed_bytes):
-    monkeypatch.setattr(collector_rss, "_fetch", lambda url: fed_feed_bytes)
+def test_collect_rss_logs_a_structured_event_with_run_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        collector_rss,
+        "poll",
+        lambda url, excerpt_max_length=300, timeout_seconds=15: [
+            {
+                "title": "FOMC holds rates; SPY reaction watched",
+                "link": "https://example.test/press/1",
+                "guid": "https://example.test/press/1",
+                "pub_date": "2026-07-04T14:00:00+00:00",
+                "description_excerpt": "test",
+            },
+            {
+                "title": "Treasury yields drift, TLT in focus",
+                "link": "https://example.test/press/2",
+                "guid": "https://example.test/press/2",
+                "pub_date": "2026-07-04T15:30:00+00:00",
+                "description_excerpt": "test",
+            },
+        ],
+    )
     runner = CliRunner()
     dbp = _db(tmp_path)
     runner.invoke(
@@ -199,8 +237,27 @@ def test_correlate_rejects_bad_date(tmp_path, paper_db):
     assert res.exit_code != 0
 
 
-def test_collect_rss_cli_exit0_on_success(tmp_path, monkeypatch, fed_feed_bytes):
-    monkeypatch.setattr(collector_rss, "_fetch", lambda url: fed_feed_bytes)
+def test_collect_rss_cli_exit0_on_success(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        collector_rss,
+        "poll",
+        lambda url, excerpt_max_length=300, timeout_seconds=15: [
+            {
+                "title": "FOMC holds rates; SPY reaction watched",
+                "link": "https://example.test/press/1",
+                "guid": "https://example.test/press/1",
+                "pub_date": "2026-07-04T14:00:00+00:00",
+                "description_excerpt": "test",
+            },
+            {
+                "title": "Treasury yields drift, TLT in focus",
+                "link": "https://example.test/press/2",
+                "guid": "https://example.test/press/2",
+                "pub_date": "2026-07-04T15:30:00+00:00",
+                "description_excerpt": "test",
+            },
+        ],
+    )
     runner = CliRunner()
     dbp = _db(tmp_path)
     runner.invoke(
