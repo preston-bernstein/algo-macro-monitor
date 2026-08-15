@@ -294,3 +294,12 @@ pass was deployed; `scripts/deploy.sh` was not run.
   is the same object as `datetime.timezone.utc`, not a behavior change.
 - Full test suite (110 tests, including the 7 new `test_config.py` cases) and `ruff check` both
   clean after the swap. Deployed via `scripts/deploy.sh` and smoke-verified the same day.
+
+**Follow-up same day: CI broke on the merge, fixed within the hour.** GitHub Actions' `ubuntu-latest`
+runner has no SSH key for the private `fleet-logging` repo, so `pip install -e ".[dev]"` failed
+the same way `internal-monitor-service`'s desktop deploy did before its deploy key was provisioned (see above).
+Fixed the same way `internal-monitor-app`/`internal-inventory-app` already solved this for `credential-crypto`:
+a dedicated, CI-only, read-only deploy key (`shared-ci-read-key` on `fleet-logging`, separate from
+the desktop service-user key) loaded via `webfactory/ssh-agent@v0.9.0` from a new
+`FLEET_LOGGING_DEPLOY_KEY` repo secret, added as a step in `.github/workflows/ci.yml` before the
+`pip install` step.
