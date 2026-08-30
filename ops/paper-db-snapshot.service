@@ -1,7 +1,8 @@
 [Unit]
-Description=Read-only transaction-consistent snapshot of paper.db into /srv/paper-share for internal-monitor-service
+Description=Read-only transaction-consistent snapshot of paper.db for macro-monitor
 
 [Service]
 Type=oneshot
-User=internal-research-service
-ExecStart=/usr/bin/python3 /usr/local/lib/internal-monitor-service/paper_db_snapshot.py
+# Adjust User= to whichever account owns the source paper.db in your deployment.
+User=paper-trading
+ExecStart=/usr/bin/python3 /usr/local/lib/macro-monitor/paper_db_snapshot.py

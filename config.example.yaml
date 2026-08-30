@@ -1,9 +1,10 @@
 # Copy to config.yaml (gitignored). Runtime configuration for macro-monitor.
 
-# Path to the transaction-consistent, read-only paper.db snapshot maintained by
-# paper-db-snapshot.timer (refreshed every 15 min). The internal-monitor-service service user reads this
-# directly via its paper-readers group membership — no SSH, no sudo (see docs/DECISIONS.md, FR-17).
-paper_db_path: /srv/paper-share/paper.db
+# Path to a transaction-consistent, read-only paper.db snapshot. How that snapshot gets
+# refreshed and who can read it is entirely up to your own deployment (see ops/ for one worked
+# example using SQLite's backup API + a periodic timer and a dedicated read-only group).
+# Overridable via the MACRO_MONITOR_PAPER_DB_PATH env var without editing this file.
+paper_db_path: /var/lib/macro-monitor/paper.db
 
 # Local append-only observation/correlation log (gitignored, WAL mode).
 db_path: data/macro_monitor.db
@@ -14,8 +15,9 @@ reports_dir: reports
 # Minimum days between LLM review runs. FR-07: default >= 7, overridable ONLY to a larger value.
 review_min_days: 7
 
-# Manually-synced snapshot of the tracked-strategy symbol universe (from paper.db targets/marks
-# distinct symbols). Deliberately NOT a live import of internal-research-service. Used to tag observations.
+# Manually-synced snapshot of the tracked-strategy symbol universe (the distinct symbols your
+# own paper-trading strategies trade). Deliberately NOT a live import of any trading package.
+# Used only to tag observations for later human/agent review.
 symbol_universe:
   - SPY
   - QQQ

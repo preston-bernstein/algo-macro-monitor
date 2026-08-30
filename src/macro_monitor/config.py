@@ -72,7 +72,7 @@ def _log_config_events_to_stderr():
 
 @dataclass
 class Config:
-    paper_db_path: str = "/srv/paper-share/paper.db"
+    paper_db_path: str = "/var/lib/macro-monitor/paper.db"
     db_path: str = "data/macro_monitor.db"
     reports_dir: str = "reports"
     review_min_days: int = 7

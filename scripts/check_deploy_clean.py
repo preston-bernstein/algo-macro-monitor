@@ -20,9 +20,9 @@ opposite of "stay polyrepo" (internal-infra CONVENTIONS.md #8: shared *libraries
 and versioned from a dedicated lib repo; this repo has no such dependency on internal-infra
 today, and inventing one only to borrow ~20 lines of git-status logic is exactly the
 speculative cross-repo coupling that convention warns against). A second, harder blocker:
-internal-monitor-service's and georgia-power-monitor's deploy.sh run directly ON the target host
-(desktop.example.internal/vmhost.example.internal), which does not have internal-infra checked out at all (verified
-2026-08-29) -- a cross-repo call would simply fail there. Keeping the SAME small, dependency-
+this repo's deploy.sh (like others in the same personal fleet) runs directly ON the target
+deploy host, which does not have internal-infra checked out at all -- a cross-repo call would
+simply fail there. Keeping the SAME small, dependency-
 free check colocated in every repo it protects means one mechanism, no assumption about what
 else is checked out on the box actually running the deploy, and no shared failure mode.
 

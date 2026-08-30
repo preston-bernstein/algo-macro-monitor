@@ -11,7 +11,7 @@ readme = "README.md"
 # desktop deploy host's python3 is 3.12.3, so this raises the declared floor to match reality
 # rather than lowering fleet-logging's.
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = { text = "MIT" }
 authors = [{ name = "Preston Bernstein", email = "contact@prestonbernstein.com" }]
 # NB (FR-12 structural guard): this list MUST NOT contain internal-research-service / algo_factory.
 # The absence of that dependency is what makes an accidental `import algo_factory` fail
@@ -23,10 +23,10 @@ dependencies = [
     # log.py and config.py, now thin wrappers around this). Pinned to an exact commit, not a
     # floating branch, matching the scraper-commons pattern (see internal-research-service/pyproject.toml).
     # Bump this pin by hand when a newer fleet-logging commit is wanted.
-    "fleet-logging @ git+ssh://git@github.com/preston-bernstein/fleet-logging.git@fab3ce04dbd1b16479527fe4a512c6f8d1f960fb",
+    "fleet-logging @ git+https://github.com/preston-bernstein/fleet-logging.git@fab3ce04dbd1b16479527fe4a512c6f8d1f960fb",
     # Same pattern as fleet-logging above (git+ssh pinned to an exact commit, not a floating
     # branch). Bump this pin by hand when a newer feed-commons commit is wanted.
-    "feed-commons @ git+ssh://git@github.com/preston-bernstein/feed-commons.git@78fd77470345fe0fd63b961eb57e383cf60a1197",
+    "feed-commons @ git+https://github.com/preston-bernstein/feed-commons.git@78fd77470345fe0fd63b961eb57e383cf60a1197",
 ]
 
 [project.optional-dependencies]

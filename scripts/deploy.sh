@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# Deploy Macro Context Monitor to the desktop under the internal-monitor-service nologin service user.
+# Deploy macro-monitor under a dedicated nologin service user.
 #
-# Mirrors internal-corpus-service/scripts/deploy.sh and internal-research-service's service-user convention. Per
-# docs/DECISIONS.md, the FR-17 paper.db read path is GROUP-READ (internal-monitor-service ∈ paper-readers reads
-# /srv/paper-share/paper.db) — this script does NOT provision an SSH-forced-command key or a
-# sudoers Cmnd_Alias; it verifies the group-read grant instead. Run as root (sudo).
+# The paper.db read path is GROUP-READ by convention: the service user reads a periodically
+# refreshed, read-only snapshot via membership in a dedicated read-only group -- this script does
+# NOT provision an SSH-forced-command key or a sudoers Cmnd_Alias; it verifies the group-read
+# grant instead. See ops/ for one worked example of producing that snapshot. Run as root (sudo).
+#
+# Configure via env vars (all optional, sensible defaults shown):
+#   MACRO_MONITOR_SERVICE_USER   (default: macro-monitor)
+#   MACRO_MONITOR_APP_DIR        (default: /home/${SERVICE_USER}/app)
+#   MACRO_MONITOR_SNAPSHOT_PATH  (default: /var/lib/macro-monitor/paper.db)
+#   MACRO_MONITOR_SNAPSHOT_GROUP (default: paper-readers)
 #
 # Usage: scripts/deploy.sh [--dry-run]
 set -euo pipefail
@@ -12,9 +18,10 @@ set -euo pipefail
 DRY_RUN=0
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
 
-SERVICE_USER=internal-monitor-service
-APP_DIR=/home/${SERVICE_USER}/app
-SNAPSHOT=/srv/paper-share/paper.db
+SERVICE_USER="${MACRO_MONITOR_SERVICE_USER:-macro-monitor}"
+APP_DIR="${MACRO_MONITOR_APP_DIR:-/home/${SERVICE_USER}/app}"
+SNAPSHOT="${MACRO_MONITOR_SNAPSHOT_PATH:-/var/lib/macro-monitor/paper.db}"
+SNAPSHOT_GROUP="${MACRO_MONITOR_SNAPSHOT_GROUP:-paper-readers}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 run() {
@@ -26,14 +33,10 @@ run() {
 }
 
 # ---- deploy-time uncommitted-file gate -------------------------------------
-# Mirrors internal-infra's tools/config-drift/preflight.sh repo-side check (ADR 0019, PR
-# #104): refuse to ship a file this deploy would push if it is not committed here. On
-# 2026-08-29 a concurrent session's uncommitted, broken config was rsynced by a routine
-# deploy elsewhere in the fleet and took down live log shipping with no warning -- this
-# is that same check, scoped to exactly what step 3/5 below actually ship (src,
-# pyproject.toml, README.md, config.example.yaml, and the two systemd unit files -- NOT
-# the whole repo: this deploy does not rsync docs/, tests/, POLISH.md, etc). Local git
-# only. Escape hatch: DEPLOY_GIT_GATE=skip (loud banner, not silent).
+# Refuses to ship a file this deploy would push if it is not committed here (scoped to exactly
+# what step 3/5 below actually ship -- src, pyproject.toml, README.md, config.example.yaml, and
+# the two systemd unit files -- NOT the whole repo: this deploy does not rsync tests/, etc).
+# Local git only. Escape hatch: DEPLOY_GIT_GATE=skip (loud banner, not silent).
 SHIPPED_PATHS=(
   config.example.yaml
   pyproject.toml
@@ -60,7 +63,7 @@ else
   case "$GATE_RC" in
     0) : ;;
     1)
-      cat >&2 <<EOF
+      cat >&2 <<'BLOCKEDMSG'
 
 DEPLOY BLOCKED: files this deploy would ship are not committed in this repo (see above).
 
@@ -68,7 +71,7 @@ DEPLOY BLOCKED: files this deploy would ship are not committed in this repo (see
   2. Commit them (or leave them if another session is mid-work), then re-run.
 
 To ship deliberately: DEPLOY_GIT_GATE=skip $0
-EOF
+BLOCKEDMSG
       exit 1
       ;;
     *)
@@ -82,20 +85,20 @@ fi
 
 echo "==> Deploying macro-monitor to ${APP_DIR} (service user: ${SERVICE_USER})"
 
-# 1. Service user must already exist (provisioned once; see docs/DECISIONS.md). Verify, don't create.
+# 1. Service user must already exist (provisioned once, out of scope for this script). Verify, don't create.
 if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
-    echo "ERROR: service user ${SERVICE_USER} does not exist — provision it before deploying." >&2
+    echo "ERROR: service user ${SERVICE_USER} does not exist -- provision it before deploying." >&2
     exit 1
 fi
 
-# 2. FR-17 read-path check: internal-monitor-service must be in paper-readers and able to read the snapshot.
-if ! id -nG "${SERVICE_USER}" | tr ' ' '\n' | grep -qx paper-readers; then
-    echo "ERROR: ${SERVICE_USER} is not in the paper-readers group (FR-17 read path)." >&2
+# 2. Read-path check: the service user must be in the snapshot's read-only group.
+if ! id -nG "${SERVICE_USER}" | tr ' ' '\n' | grep -qx "${SNAPSHOT_GROUP}"; then
+    echo "ERROR: ${SERVICE_USER} is not in the ${SNAPSHOT_GROUP} group (paper.db read path)." >&2
     exit 1
 fi
 if [[ $DRY_RUN -eq 0 ]]; then
     if ! sudo -u "${SERVICE_USER}" test -r "${SNAPSHOT}"; then
-        echo "WARN: ${SERVICE_USER} cannot yet read ${SNAPSHOT} — is paper-db-snapshot.timer active?" >&2
+        echo "WARN: ${SERVICE_USER} cannot yet read ${SNAPSHOT} -- is your snapshot-refresh timer active?" >&2
     fi
 fi
 

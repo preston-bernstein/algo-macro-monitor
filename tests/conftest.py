@@ -8,7 +8,7 @@ import pytest
 
 from macro_monitor import db, sources
 
-# The REAL paper.db schema, confirmed live (docs/macro-context-monitor/.ctx.md):
+# A schema-faithful paper.db fixture (a real deployment's schema shape, generic strategy names):
 #   marks(date, symbol, price)
 #   targets(date, strategy, symbol, weight, units, notional, fill_quality)
 #   gate_results(run_date, strategy, passed, sharpe, sr_oos, mintrl, dsr, pbo, mc_prob_profit, reasons)
@@ -48,9 +48,9 @@ def paper_db(tmp_path) -> str:
     conn.executemany(
         "INSERT INTO targets VALUES (?,?,?,?,?,?,?)",
         [
-            ("2026-07-04", "strategy_a", "SPY", 0.25, 100, 55000.0, 0.98),
-            ("2026-07-04", "strategy_j", "TLT", -0.10, 40, 4000.0, 0.95),
-            ("2026-07-01", "strategy_a", "SPY", 0.30, 120, 66000.0, 0.97),  # decoy date
+            ("2026-07-04", "strategy-a", "SPY", 0.25, 100, 55000.0, 0.98),
+            ("2026-07-04", "strategy-b", "TLT", -0.10, 40, 4000.0, 0.95),
+            ("2026-07-01", "strategy-a", "SPY", 0.30, 120, 66000.0, 0.97),  # decoy date
         ],
     )
     conn.executemany(
@@ -64,8 +64,8 @@ def paper_db(tmp_path) -> str:
     conn.executemany(
         "INSERT INTO gate_results VALUES (?,?,?,?,?,?,?,?,?,?)",
         [
-            ("2026-07-04", "strategy_a", 1, 1.2, 0.9, 12, 0.8, 0.1, 0.7, "ok"),
-            ("2026-07-01", "strategy_a", 0, 0.3, 0.1, 4, 0.2, 0.6, 0.4, "fail"),  # decoy
+            ("2026-07-04", "strategy-a", 1, 1.2, 0.9, 12, 0.8, 0.1, 0.7, "ok"),
+            ("2026-07-01", "strategy-a", 0, 0.3, 0.1, 4, 0.2, 0.6, 0.4, "fail"),  # decoy
         ],
     )
     conn.commit()
