@@ -102,7 +102,7 @@ def test_correlate_gate_results_captures_passed(log_conn, paper_db):
     ).fetchone()
     rows = json.loads(gr["row_json"])
     assert rows[0]["passed"] == 1
-    assert rows[0]["strategy"] == "cross_asset_trend"
+    assert rows[0]["strategy"] == "strategy-a"
 
 
 def test_correlate_dedup_on_rerun(log_conn, paper_db):

@@ -1,9 +1,9 @@
 """End-to-end smoke test: real RSS feed -> ingest -> correlate against a fixture paper.db.
 
-The correlate leg runs against the schema-faithful ``paper_db`` fixture rather than the real
-/srv/paper-share/paper.db snapshot: the snapshot is readable only by the ``algo-macro`` service
-user (paper-readers group), which the test runner is not. The real-snapshot leg is exercised by
-scripts/smoke_e2e.sh under the deployed service user (see docs/DECISIONS.md).
+The correlate leg runs against the schema-faithful ``paper_db`` fixture rather than a real
+deployment's live snapshot: that snapshot is readable only by the deployed service account (via
+its read-only group membership), which the test runner is not. The real-snapshot leg is exercised
+by scripts/smoke_e2e.sh under the deployed service user.
 
 The live-feed leg is network-gated: if the feed is unreachable from the sandbox it is skipped, not
 failed.

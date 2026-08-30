@@ -1,40 +1,39 @@
 [Unit]
-Description=Macro Context Monitor — daily RSS collection + read-only paper.db correlation
+Description=Macro Context Monitor -- daily RSS collection + read-only paper.db correlation
 Documentation=https://github.com/preston-bernstein/algo-macro-monitor
-# The correlator reads the local snapshot at /srv/paper-share/paper.db (refreshed by
-# paper-db-snapshot.timer). We do not hard-require that unit here — a missing/stale snapshot is a
-# logged no-op for the day (FR-05 failure handling), never a crash.
+# The correlator reads a local read-only snapshot (see ops/ for one worked example of producing
+# one, and config.example.yaml's paper_db_path). We do not hard-require that unit here -- a
+# missing/stale snapshot is a logged no-op for the day (FR-05 failure handling), never a crash.
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=algo-macro
-Group=algo-macro
-WorkingDirectory=/home/algo-macro/app
+# Adjust User=/Group=/WorkingDirectory=/ExecStart= to match wherever scripts/deploy.sh installed
+# this service's account and app directory in your deployment (default: macro-monitor, per
+# scripts/deploy.sh's MACRO_MONITOR_SERVICE_USER / MACRO_MONITOR_APP_DIR).
+User=macro-monitor
+Group=macro-monitor
+WorkingDirectory=/home/macro-monitor/app
 SyslogIdentifier=macro-monitor
 # 1) deterministic RSS collection (FR-01, no LLM); 2) read-only paper.db correlation over a
-# trailing window (FR-05/06/17/18/19). Previously this second line passed `--date
-# "$(date -u +%%Y-%%m-%%d)"` -- an exact date the daily 06:30 UTC fire could never actually match,
-# because raw_observations is stamped with each feed entry's own published date, which by 06:30
-# UTC has not yet advanced to "today" for any US-business-hours source. That made correlate a
-# permanent no-op in production (confirmed: correlations held 2 rows total, both from a one-off
-# manual DECISIONS.md check, never from the timer). `correlate` with no --date now defaults to a
-# trailing window (config's correlate_lookback_days) instead of one exact day -- see
-# src/macro_monitor/correlator.py's observed_dates_since docstring for the full account.
-ExecStart=/home/algo-macro/app/.venv/bin/macro-monitor --config /home/algo-macro/app/config.yaml collect-rss
-ExecStart=/home/algo-macro/app/.venv/bin/macro-monitor --config /home/algo-macro/app/config.yaml correlate
+# trailing window (FR-05/06/17/18/19). The correlate step intentionally passes no --date -- see
+# src/macro_monitor/correlator.py's observed_dates_since docstring for why an exact-date
+# invocation is a likely permanent no-op for a daily timer against feed-published dates.
+ExecStart=/home/macro-monitor/app/.venv/bin/macro-monitor --config /home/macro-monitor/app/config.yaml collect-rss
+ExecStart=/home/macro-monitor/app/.venv/bin/macro-monitor --config /home/macro-monitor/app/config.yaml correlate
 
-# Hardening — this process ingests untrusted RSS content; keep its blast radius minimal.
+# Hardening -- this process ingests untrusted RSS content; keep its blast radius minimal.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-# Writable: the local log DB, generated reports, and the shared node-exporter textfile-collector
-# directory this unit's .prom metrics land in (§18 -- a oneshot job can't be scraped, so metrics
-# go out via the textfile collector on the way out). paper.db is read via /srv/paper-share (ro).
-ReadWritePaths=/home/algo-macro/app/data /home/algo-macro/app/reports /opt/docker/observability/node-exporter-textfiles
-ReadOnlyPaths=/srv/paper-share
+# Writable: the local log DB, generated reports, and wherever your node-exporter textfile
+# collector reads .prom files from (a oneshot job can't be scraped, so metrics go out via the
+# textfile collector on the way out -- see src/macro_monitor/metrics.py). paper.db itself is
+# read via the read-only snapshot path.
+ReadWritePaths=/home/macro-monitor/app/data /home/macro-monitor/app/reports /var/lib/node_exporter/textfile_collector
+ReadOnlyPaths=/var/lib/macro-monitor
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

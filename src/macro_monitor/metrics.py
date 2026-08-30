@@ -34,7 +34,7 @@ import os
 import re
 import time
 
-DEFAULT_TEXTFILE_DIR = "/opt/docker/observability/node-exporter-textfiles"
+DEFAULT_TEXTFILE_DIR = "/var/lib/node_exporter/textfile_collector"
 TEXTFILE_DIR_ENV = "MACRO_MONITOR_TEXTFILE_DIR"
 METRIC_FILE_NAME = "macro_monitor.prom"
 

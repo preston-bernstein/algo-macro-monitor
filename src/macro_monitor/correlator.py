@@ -1,13 +1,14 @@
 """Read-only correlation of observations with paper.db (FR-05/FR-06/FR-17/FR-18/FR-19).
 
-Read path (FR-17, per docs/DECISIONS.md — supersedes plan.md's SSH-forced-command text): the
-correlator does a plain LOCAL read of the transaction-consistent snapshot at
-``/srv/paper-share/paper.db``, which the ``algo-macro`` service user can read via its
-``paper-readers`` group membership. No SSH, no sudo, no traversal into /home/algo-factory. Because
-there is no shell/subprocess/SSH layer at all, FR-18's "never build a command layer via string
-interpolation" concern collapses to a single rule that is enforced here: the only externally
-derived value that touches the query — ``observed_date`` — is strictly validated (YYYY-MM-DD +
-real calendar date) and then passed ONLY as a bound SQL parameter (``?``), never interpolated.
+Read path (FR-17): the correlator does a plain LOCAL read of a transaction-consistent, read-only
+snapshot file (path and permissions are entirely up to your own deployment -- see
+config.example.yaml's paper_db_path and ops/ for one worked example: a dedicated non-privileged
+service account with read-only group membership on a periodically-refreshed snapshot). No SSH, no
+sudo, no traversal into the source database's own host directory. Because there is no
+shell/subprocess/SSH layer at all, FR-18's "never build a command layer via string interpolation"
+concern collapses to a single rule that is enforced here: the only externally derived value that
+touches the query — ``observed_date`` — is strictly validated (YYYY-MM-DD + real calendar date)
+and then passed ONLY as a bound SQL parameter (``?``), never interpolated.
 
 FR-06: the snapshot is opened ``mode=ro`` via SQLite URI; a write-mode open is refused. FR-19: the
 SELECT lists only minimal, non-proprietary columns per table — never weight/units/notional (nor the
@@ -24,7 +25,7 @@ from dataclasses import dataclass
 from . import db
 from .validation import ValidationError, validate_observed_date
 
-DEFAULT_PAPER_DB = "/srv/paper-share/paper.db"
+DEFAULT_PAPER_DB = "/var/lib/macro-monitor/paper.db"
 
 # The date column differs per table — targets/marks use "date", gate_results uses "run_date".
 # The query builder keys off the table name to pick the right one; it never assumes they match.

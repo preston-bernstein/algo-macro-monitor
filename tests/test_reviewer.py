@@ -18,8 +18,8 @@ from macro_monitor.reviewer import (
 
 def _good_hypothesis():
     return {
-        "slug": "fed-presser-day-cross-asset-trend-drift",
-        "mechanism_description": "On FOMC press-release days, cross_asset_trend targets drifted.",
+        "slug": "fed-presser-day-strategy-a-drift",
+        "mechanism_description": "On FOMC press-release days, strategy-a's targets drifted.",
         "cited_observation_ids": [1],
         "cited_paper_db_summary": {"targets": 2, "gate_results": 1},
         "overfitting_disclosure": OVERFITTING_DISCLOSURE,
@@ -31,7 +31,7 @@ def _good_hypothesis():
 
 def test_valid_hypothesis_passes():
     out = validate_hypothesis(_good_hypothesis())
-    assert out["slug"] == "fed-presser-day-cross-asset-trend-drift"
+    assert out["slug"] == "fed-presser-day-strategy-a-drift"
 
 
 @pytest.mark.parametrize("bad_slug", ["Bad Slug", "has_underscore", "-leading", "UPPER", "a--b", ""])
@@ -120,9 +120,9 @@ def test_persist_writes_row_and_report(tmp_path):
     path = persist_hypothesis(conn, run_id, _good_hypothesis(), reports_dir=str(tmp_path))
 
     row = conn.execute("SELECT slug FROM candidate_hypotheses").fetchone()
-    assert row["slug"] == "fed-presser-day-cross-asset-trend-drift"
+    assert row["slug"] == "fed-presser-day-strategy-a-drift"
     text = open(path).read()
-    assert "fed-presser-day-cross-asset-trend-drift" in text
+    assert "fed-presser-day-strategy-a-drift" in text
     assert OVERFITTING_DISCLOSURE in text
     assert "2026-07-04" in text  # cited observed_date rendered
 
